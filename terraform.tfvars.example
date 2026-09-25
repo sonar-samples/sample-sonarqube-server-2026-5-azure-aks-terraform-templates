@@ -1,0 +1,21 @@
+subscription_id = "00000000-0000-0000-0000-000000000000"
+location        = "westeurope"
+
+resource_group_name = "sonarqube-2026-5"
+cluster_name        = "sonarqube-aks"
+postgres_name       = "sonarqube-pg-changeme" # globally unique
+
+# REQUIRED. See README "Release status" before setting this.
+sonarqube_chart_version = "2026.5.x"
+
+# Leave false until the pinned chart version ships the agentic components.
+enable_agentic = false
+
+# Set true only on a second apply, after creating sonarqube-encryption-secret.
+enable_settings_encryption = false
+
+llm_allowed_domains = ["api.anthropic.com"]
+
+tags = {
+  # Team = "..."   # add whatever your subscription policy requires
+}
