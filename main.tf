@@ -42,7 +42,9 @@ resource "azurerm_kubernetes_cluster" "this" {
 }
 
 # Pod sandboxing pool. os_sku MUST be AzureLinux — no other OS SKU supports it.
-# Idles at zero; the cluster autoscaler brings a node up when a runtime pod is pending.
+# min_count = 0 permits scale-down only when nothing schedulable needs the pool. With
+# fixed runtime replicas those pods are long-lived, so expect this pool to scale up at
+# deploy time and stay provisioned. True scale-to-zero needs validated chart autoscaling.
 resource "azurerm_kubernetes_cluster_node_pool" "sandbox" {
   count = var.enable_agentic ? 1 : 0
 
