@@ -8,6 +8,7 @@ resource "helm_release" "sonarqube" {
 
   values = [templatefile("${path.module}/sonarqube-values.yaml.tftpl", {
     postgres_fqdn       = azurerm_postgresql_flexible_server.this.fqdn
+    server_image_tag    = var.sonarqube_image_tag
     minio_endpoint      = local.minio_endpoint
     agentic             = var.enable_agentic
     runtime_class       = var.sandbox_runtime_class

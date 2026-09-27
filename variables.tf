@@ -36,6 +36,15 @@ variable "sonarqube_chart_version" {
   type        = string
 }
 
+# The chart composes the Server image tag from Chart.AppVersion when `edition` is set
+# and this is empty. On chart 2026.5.1000 the appVersion is still 2026.4.0, so leaving
+# this empty SILENTLY DEPLOYS 2026.4. Set it explicitly until `helm show chart` reports
+# a 2026.5 appVersion. Example: "2026.5.0-enterprise".
+variable "sonarqube_image_tag" {
+  type    = string
+  default = ""
+}
+
 variable "enable_agentic" {
   description = "Deploy Vortex, the Agent Orchestrator and both agent runtimes. Leave false until the chart version you pinned actually ships the agentic components."
   type        = bool

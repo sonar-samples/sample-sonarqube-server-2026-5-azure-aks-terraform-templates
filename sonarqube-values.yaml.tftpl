@@ -1,4 +1,8 @@
 edition: enterprise
+%{ if server_image_tag != "" ~}
+image:
+  tag: "${server_image_tag}"
+%{ endif ~}
 
 jdbcOverwrite:
   enabled: true

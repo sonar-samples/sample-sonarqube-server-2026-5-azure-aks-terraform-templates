@@ -8,6 +8,9 @@ postgres_name       = "sonarqube-pg-changeme" # globally unique
 # REQUIRED. See README "Release status" before setting this.
 sonarqube_chart_version = "2026.5.x"
 
+# Set while the chart's appVersion lags its version — otherwise you get 2026.4.
+sonarqube_image_tag = "2026.5.0-enterprise"
+
 # Leave false until the pinned chart version ships the agentic components.
 enable_agentic = false
 

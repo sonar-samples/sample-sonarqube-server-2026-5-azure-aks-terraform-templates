@@ -10,20 +10,67 @@ repository.
 
 ## Release status — read before setting a chart version
 
-**As of 2026-09-25 the agentic components are not yet available in the published SonarQube Helm
-chart.** The agentic feature branch has not merged to master, `2026.5.1000` chart metadata is
-still being finalized, and the deployment change remains a draft PR without a completed
-full-cluster test. Agentic images have been promoted to the `sonarsource` Docker Hub organization
-at tag `2026.5.0`, but a published chart that wires them up is a separate deliverable.
+**Verified 2026-09-27: there is no published 2026.5 chart. The agentic pack is not installable
+from the official Helm repository yet.**
 
-Consequently:
+| | |
+| --- | --- |
+| Published index (`SonarSource.github.io/helm-chart-sonarqube`) | newest `sonarqube` chart is **2026.4.1**. No 2026.5.x. |
+| GitHub `master` | `charts/sonarqube/Chart.yaml` declares **2026.5.1000**, and all seven agentic value blocks are present |
+| `appVersion` on `master` | still **2026.4.0**, so the default Enterprise image resolves to `sonarqube:2026.4.0-enterprise` |
 
-- `enable_agentic` defaults to **false**. With it false, this deploys SonarQube Server 2026.5
-  Enterprise on AKS and nothing agentic — a valid, useful configuration on its own.
-- `sonarqube_chart_version` has **no default**. Set it deliberately, to a version you have
-  confirmed exists.
-- Before setting `enable_agentic = true`, confirm the chart version you pinned actually carries
-  the agentic values. See [Verifying chart support](#verifying-chart-support).
+**A source merge is not a release.** The published Helm index is the release authority for
+customers. Do not install from a git checkout of `master` and do not treat 2026.5.1000 as
+available until it appears in that index.
+
+### Release acceptance criteria
+
+Run all four before setting `enable_agentic = true`. Every one must pass.
+
+```sh
+helm repo add sonarqube https://SonarSource.github.io/helm-chart-sonarqube
+helm repo update
+
+# 1. A 2026.5.x chart is published
+helm search repo sonarqube/sonarqube --versions | head -20
+
+# 2. appVersion is 2026.5
+helm show chart sonarqube/sonarqube --version <2026.5-version> | grep -E '^(version|appVersion):'
+
+# 3. All four agentic value blocks exist
+helm show values sonarqube/sonarqube --version <2026.5-version> \
+  | grep -E '^(agentOrchestrator|hunterAgent|remediationAgent|vortexAnalysis):'
+
+# 4. The Enterprise image resolves to 2026.5
+helm template sonarqube sonarqube/sonarqube --version <2026.5-version> \
+  --set edition=enterprise | grep -E 'image:.*sonarqube'
+```
+
+### The appVersion trap
+
+Criterion 2 is not bookkeeping. The chart composes the Server image tag from `Chart.AppVersion`
+whenever `edition` is set and `image.tag` is not:
+
+```
+{{- $imageTag = printf "%s-%s" .Chart.AppVersion .Values.edition -}}
+```
+
+So against a 2026.5.1000 chart whose appVersion is still 2026.4.0, `edition: enterprise` alone
+deploys **SonarQube 2026.4** with no error anywhere. That is why `sonarqube_image_tag` exists:
+set it explicitly until criterion 2 passes, and verify after deploying with
+`curl .../api/server/version`.
+
+### What this means for you today
+
+- `enable_agentic` defaults to **false**. With it false this deploys SonarQube Server Enterprise
+  on AKS from the current published chart — useful and complete on its own.
+- `sonarqube_chart_version` has **no default**. Pin a version you confirmed with criterion 1.
+- Set `sonarqube_image_tag` until criterion 2 passes.
+
+The internal early-access path used to validate the agentic components — Repox, a private ECR,
+and pre-GA licensing — is not a customer distribution path and is deliberately absent from this
+configuration. Once released, customers use the official chart and public images, and may mirror
+those images into their own registry for air-gapped or registry-policy reasons.
 
 ## Layout
 
@@ -72,31 +119,6 @@ runs. After first boot:
 
 This key encrypts stored LLM provider credentials and is mounted into the Agent Orchestrator, so
 do it before enabling the agents.
-
-### Verifying chart support
-
-Before `enable_agentic = true`:
-
-```sh
-helm repo add sonarqube https://SonarSource.github.io/helm-chart-sonarqube
-helm repo update
-helm show values sonarqube/sonarqube --version <your-version> > ga-values.yaml
-
-for k in vortexAnalysis agentOrchestrator hunterAgent remediationAgent \
-         agentEgressProxy agentRuntimeSandbox agentKeyDerivation gvisor; do
-  printf '%-22s %s\n' "$k" "$(grep -c "^$k:" ga-values.yaml)"
-done
-```
-
-Every key must return `1`. If any return `0`, the chart does not yet support the agentic pack and
-enabling it will fail at install time or, worse, silently do nothing.
-
-Also confirm the chart resolves images without registry credentials:
-
-```sh
-helm template sonarqube sonarqube/sonarqube --version <your-version> \
-  | grep -E "image:" | sort -u
-```
 
 ## Requirements
 
