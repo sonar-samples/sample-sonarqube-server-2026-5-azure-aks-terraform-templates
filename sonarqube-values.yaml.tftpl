@@ -54,6 +54,10 @@ extraVolumeMounts:
 
 vortexAnalysis:
   enabled: true
+  # The chart ships blank image defaults; validation fails without these.
+  image:
+    repository: "${images.vortex.repository}"
+    tag: "${images.vortex.tag}"
   nodeSelector:
     workload: system
   # bucket/region are meaningless for a file backend; the chart gates them on type.
@@ -73,6 +77,10 @@ vortexAnalysis:
 
 agentOrchestrator:
   enabled: true
+  # The chart ships blank image defaults; validation fails without these.
+  image:
+    repository: "${images.orchestrator.repository}"
+    tag: "${images.orchestrator.tag}"
   scheduler:
     enabled: true
   nodeSelector:
@@ -93,6 +101,10 @@ agentOrchestrator:
 
 hunterAgent:
   enabled: true
+  # The chart ships blank image defaults; validation fails without these.
+  image:
+    repository: "${images.hunter.repository}"
+    tag: "${images.hunter.tag}"
   replicaCount: 1
   nodeSelector:
     workload: sandbox
@@ -120,6 +132,10 @@ hunterAgent:
 
 remediationAgent:
   enabled: true
+  # The chart ships blank image defaults; validation fails without these.
+  image:
+    repository: "${images.remediation.repository}"
+    tag: "${images.remediation.tag}"
   replicaCount: 1
   nodeSelector:
     workload: sandbox

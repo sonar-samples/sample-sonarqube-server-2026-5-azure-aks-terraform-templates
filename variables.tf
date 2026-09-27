@@ -67,6 +67,25 @@ variable "sandbox_max_nodes" {
   default = 2
 }
 
+# The chart ships BLANK image defaults for all four agentic components, so these are required
+# when enable_agentic is true — chart validation fails with "image.repository is not set"
+# otherwise. Take them from the release's approved image manifest; do not guess tags.
+variable "agentic_images" {
+  description = "Release-approved image references for each agentic component."
+  type = object({
+    vortex       = object({ repository = string, tag = string })
+    orchestrator = object({ repository = string, tag = string })
+    hunter       = object({ repository = string, tag = string })
+    remediation  = object({ repository = string, tag = string })
+  })
+  default = {
+    vortex       = { repository = "", tag = "" }
+    orchestrator = { repository = "", tag = "" }
+    hunter       = { repository = "", tag = "" }
+    remediation  = { repository = "", tag = "" }
+  }
+}
+
 variable "jobs_storage_size" {
   description = "Azure Files share for agent job artifacts. Roughly (jobs/day x retention days x 1MB) plus headroom for in-flight repository archives."
   type        = string
@@ -79,16 +98,39 @@ variable "vortex_storage_size" {
   default     = "100Gi"
 }
 
+# No default on purpose. The RuntimeClass name is environment-specific: AKS has used both
+# kata-vm-isolation and kata-mshv-vm-isolation, and the chart documents the latter as its AKS
+# example. Discover it before you apply:
+#   kubectl get runtimeclass
 variable "sandbox_runtime_class" {
-  description = "RuntimeClass AKS creates for pod sandboxing. Confirm with `kubectl get runtimeclass` — older clusters use kata-mshv-vm-isolation."
+  description = "RuntimeClass to schedule the agent runtimes onto. Required when enable_agentic is true. Discover with `kubectl get runtimeclass`; do not guess."
   type        = string
-  default     = "kata-vm-isolation"
+  default     = ""
 }
 
 variable "llm_allowed_domains" {
   description = "Hostnames the agent runtimes may reach through the egress proxy, in addition to shared storage."
   type        = list(string)
   default     = ["api.anthropic.com"]
+}
+
+# Azure Files is SMB: ownership and modes come from the StorageClass mount options, not fsGroup.
+# 0777 is a troubleshooting/reference setting that lets any container UID write. For anything
+# beyond a lab, set share_gid to a gid the agentic pods carry and drop the modes to 0770.
+variable "share_dir_mode" {
+  type    = string
+  default = "0777"
+}
+
+variable "share_file_mode" {
+  type    = string
+  default = "0777"
+}
+
+variable "share_gid" {
+  description = "gid owning the Azure Files shares. Leave 0 with 0777 modes; set a real gid alongside 0770 modes and a matching pod fsGroup for least privilege."
+  type        = string
+  default     = "0"
 }
 
 variable "enable_settings_encryption" {

@@ -33,11 +33,14 @@ resource "kubernetes_storage_class_v1" "agentic_files" {
     skuName = "Standard_LRS"
   }
 
+  # REFERENCE SETTING, not a production default. The defaults are 0777/gid=0, which lets any
+  # container UID write and is what was validated here. For anything beyond a lab, set share_gid
+  # to a gid the agentic pods carry, drop the modes to 0770, and add a matching pod fsGroup.
   mount_options = [
-    "dir_mode=0777",
-    "file_mode=0777",
+    "dir_mode=${var.share_dir_mode}",
+    "file_mode=${var.share_file_mode}",
     "uid=0",
-    "gid=0",
+    "gid=${var.share_gid}",
     "mfsymlinks",
     "cache=strict",
     "actimeo=30",

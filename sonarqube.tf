@@ -9,6 +9,7 @@ resource "helm_release" "sonarqube" {
   values = [templatefile("${path.module}/sonarqube-values.yaml.tftpl", {
     postgres_fqdn       = azurerm_postgresql_flexible_server.this.fqdn
     server_image_tag    = var.sonarqube_image_tag
+    images              = var.agentic_images
     jobs_claim          = local.jobs_claim
     vortex_claim        = local.vortex_claim
     jobs_base_dir       = local.jobs_base_dir

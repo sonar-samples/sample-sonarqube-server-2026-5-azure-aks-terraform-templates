@@ -8,8 +8,22 @@ postgres_name       = "sonarqube-pg-changeme" # globally unique
 # REQUIRED. See README "Release status" before setting this.
 sonarqube_chart_version = "2026.5.x"
 
-# Set while the chart's appVersion lags its version — otherwise you get 2026.4.
-sonarqube_image_tag = "2026.5.0-enterprise"
+# The release-approved Server image tag. Chart version and image version are a tested tuple —
+# do not leave this empty and rely on the chart composing a tag from appVersion.
+sonarqube_image_tag = "<approved Server tag>"
+
+# Required when enable_agentic = true. The chart ships blank defaults, so validation fails
+# without these. Take them from the release's approved image manifest.
+agentic_images = {
+  vortex       = { repository = "<repo>", tag = "<tag>" }
+  orchestrator = { repository = "<repo>", tag = "<tag>" }
+  hunter       = { repository = "<repo>", tag = "<tag>" }
+  remediation  = { repository = "<repo>", tag = "<tag>" }
+}
+
+# Required when enable_agentic = true. Discover it, do not guess:
+#   kubectl get runtimeclass
+sandbox_runtime_class = ""
 
 # Leave false until the pinned chart version ships the agentic components.
 enable_agentic = false

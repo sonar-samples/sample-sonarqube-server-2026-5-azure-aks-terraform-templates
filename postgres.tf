@@ -4,14 +4,17 @@ resource "random_password" "postgres" {
 }
 
 resource "azurerm_postgresql_flexible_server" "this" {
-  name                          = var.postgres_name
-  resource_group_name           = azurerm_resource_group.this.name
-  location                      = var.location
-  version                       = "16"
-  sku_name                      = "GP_Standard_D2ds_v5"
-  storage_mb                    = 32768
-  administrator_login           = "sonarqube"
-  administrator_password        = random_password.postgres.result
+  name                   = var.postgres_name
+  resource_group_name    = azurerm_resource_group.this.name
+  location               = var.location
+  version                = "16"
+  sku_name               = "GP_Standard_D2ds_v5"
+  storage_mb             = 32768
+  administrator_login    = "sonarqube"
+  administrator_password = random_password.postgres.result
+  # REFERENCE SETTING. A public endpoint narrowed to the cluster's outbound IP keeps this module
+  # self-contained, but it is not a production baseline. For production use a delegated subnet
+  # with private access, a private DNS zone, and no public endpoint.
   public_network_access_enabled = true
   tags                          = var.tags
 
