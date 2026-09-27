@@ -1,5 +1,7 @@
 edition: enterprise
 %{ if server_image_tag != "" ~}
+# The chart composes the tag from Chart.AppVersion when `edition` is set and this is
+# empty, so a chart whose appVersion lags its version would deploy the older Server.
 image:
   tag: "${server_image_tag}"
 %{ endif ~}
@@ -16,40 +18,58 @@ monitoringPasscodeSecretKey: "passcode"
 
 nodeSelector:
   workload: system
-
 %{ if settings_encryption ~}
+
 sonarSecretKey: "sonarqube-encryption-secret"
 %{ endif ~}
 %{ if agentic ~}
 
-# --- Agentic components ---------------------------------------------------------
-#
-# If the chart version you pinned does not yet ship agentic image defaults, set the
-# repository and tag on each component below from the release notes.
+# --- Agentic components -------------------------------------------------------------
 
 agenticSigningSecret:
   existingSecret: "agentic-instance-secret"
   key: "instance-secret"
 
-# On AKS use the platform's own sandbox. The chart's gVisor installer would fight
-# the containerd configuration AKS manages itself.
+# On AKS use the platform's own pod sandboxing. The chart's gVisor installer is a
+# privileged DaemonSet that rewrites containerd configuration, which AKS manages itself.
 gvisor:
   enabled: false
 agentRuntimeSandbox:
   enabled: true
   runtimeClassName: ${runtime_class}
 
+# SonarQube Server writes the analyzer context Vortex restores, so it mounts the same
+# share and both point at the same path.
+sonarProperties:
+  sonar.agentic.storage.type: FILESYSTEM
+  sonar.agentic.storage.filesystem.base-dir: ${vortex_base_dir}
+
+extraVolumes:
+  - name: vortex-context
+    persistentVolumeClaim:
+      claimName: ${vortex_claim}
+extraVolumeMounts:
+  - name: vortex-context
+    mountPath: ${vortex_base_dir}
+
 vortexAnalysis:
   enabled: true
   nodeSelector:
     workload: system
+  # bucket/region are meaningless for a file backend; the chart gates them on type.
   storage:
-    type: S3
-    bucket: vortex-context
-    region: us-east-1
-    endpoint: "${minio_endpoint}"
-    pathStyleAccess: true
-    existingSecret: "vortex-storage-creds"
+    type: FILESYSTEM
+    filesystem:
+      baseDir: ${vortex_base_dir}
+  extraVolumes:
+    - name: vortex-context
+      persistentVolumeClaim:
+        claimName: ${vortex_claim}
+  # Vortex only reads context. SonarQube Server writes it.
+  extraVolumeMounts:
+    - name: vortex-context
+      mountPath: ${vortex_base_dir}
+      readOnly: true
 
 agentOrchestrator:
   enabled: true
@@ -58,12 +78,18 @@ agentOrchestrator:
   nodeSelector:
     workload: system
   storage:
-    type: S3
-    bucket: agent-jobs
-    region: us-east-1
-    endpoint: "${minio_endpoint}"
-    pathStyle: true
-    existingSecret: "agentic-storage-creds"
+    type: FILESYSTEM
+    filesystem:
+      baseDir: ${jobs_base_dir}
+  # Mounts the share at its root and writes each runtime's jobs into a subdirectory
+  # named after that runtime.
+  extraVolumes:
+    - name: agentic-jobs
+      persistentVolumeClaim:
+        claimName: ${jobs_claim}
+  extraVolumeMounts:
+    - name: agentic-jobs
+      mountPath: ${jobs_base_dir}
 
 hunterAgent:
   enabled: true
@@ -77,6 +103,20 @@ hunterAgent:
       effect: NoSchedule
   networkPolicy:
     enabled: true
+  # Mounts ONLY its own subdirectory, so it cannot see the other runtime's files.
+  # Chart validation requires a mountPath at or above storage.filesystem.baseDir.
+  storage:
+    type: FILESYSTEM
+    filesystem:
+      baseDir: ${jobs_base_dir}/hunter
+  extraVolumes:
+    - name: agentic-jobs
+      persistentVolumeClaim:
+        claimName: ${jobs_claim}
+  extraVolumeMounts:
+    - name: agentic-jobs
+      mountPath: ${jobs_base_dir}/hunter
+      subPath: hunter
 
 remediationAgent:
   enabled: true
@@ -90,26 +130,29 @@ remediationAgent:
       effect: NoSchedule
   networkPolicy:
     enabled: true
+  storage:
+    type: FILESYSTEM
+    filesystem:
+      baseDir: ${jobs_base_dir}/remediation
+  extraVolumes:
+    - name: agentic-jobs
+      persistentVolumeClaim:
+        claimName: ${jobs_claim}
+  extraVolumeMounts:
+    - name: agentic-jobs
+      mountPath: ${jobs_base_dir}/remediation
+      subPath: remediation
 
-# No enabled flag — the egress proxy renders whenever a runtime does.
+# No enabled flag — the egress proxy renders whenever a runtime does. With a filesystem
+# backend only the LLM provider needs allowing; storage is a mount, not a network call.
 agentEgressProxy:
   allowedDomains:
 %{ for d in llm_domains ~}
     - ${d}
 %{ endfor ~}
-    - minio.sonarqube.svc.cluster.local
   networkPolicy:
     enabled: true
     egressPorts: [80, 443]
     egressExcludeCidrs:
       - 169.254.0.0/16
-
-# SonarQube Server writes the analyzer context Vortex restores, so both must point
-# at the same bucket.
-sonarProperties:
-  sonar.agentic.storage.type: S3
-  sonar.agentic.storage.bucket: vortex-context
-  sonar.agentic.storage.region: us-east-1
-  sonar.agentic.storage.endpoint: "${minio_endpoint}"
-  sonar.agentic.storage.path-style-access: "true"
 %{ endif ~}

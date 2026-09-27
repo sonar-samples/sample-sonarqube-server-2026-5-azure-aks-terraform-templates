@@ -9,7 +9,10 @@ resource "helm_release" "sonarqube" {
   values = [templatefile("${path.module}/sonarqube-values.yaml.tftpl", {
     postgres_fqdn       = azurerm_postgresql_flexible_server.this.fqdn
     server_image_tag    = var.sonarqube_image_tag
-    minio_endpoint      = local.minio_endpoint
+    jobs_claim          = local.jobs_claim
+    vortex_claim        = local.vortex_claim
+    jobs_base_dir       = local.jobs_base_dir
+    vortex_base_dir     = local.vortex_base_dir
     agentic             = var.enable_agentic
     runtime_class       = var.sandbox_runtime_class
     llm_domains         = var.llm_allowed_domains
@@ -19,11 +22,10 @@ resource "helm_release" "sonarqube" {
   depends_on = [
     azurerm_kubernetes_cluster_node_pool.sandbox,
     azurerm_postgresql_flexible_server_firewall_rule.aks,
-    helm_release.minio,
+    kubernetes_persistent_volume_claim_v1.jobs,
+    kubernetes_persistent_volume_claim_v1.vortex,
     kubernetes_secret_v1.db,
     kubernetes_secret_v1.monitoring,
     kubernetes_secret_v1.agentic_instance,
-    kubernetes_secret_v1.agentic_storage,
-    kubernetes_secret_v1.vortex_storage,
   ]
 }

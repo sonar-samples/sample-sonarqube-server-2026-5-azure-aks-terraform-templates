@@ -19,6 +19,12 @@ enable_settings_encryption = false
 
 llm_allowed_domains = ["api.anthropic.com"]
 
+# Azure Files share sizes. Job artifacts are roughly
+# (jobs/day x retention days x 1MB) plus headroom for in-flight repo archives;
+# Vortex analyzer context is considerably larger per project.
+jobs_storage_size   = "100Gi"
+vortex_storage_size = "100Gi"
+
 tags = {
   # Team = "..."   # add whatever your subscription policy requires
 }

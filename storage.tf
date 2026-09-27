@@ -5,40 +5,82 @@ resource "kubernetes_namespace_v1" "sonarqube" {
 }
 
 locals {
-  ns             = kubernetes_namespace_v1.sonarqube.metadata[0].name
-  minio_endpoint = "http://minio.sonarqube.svc.cluster.local:9000"
+  ns              = kubernetes_namespace_v1.sonarqube.metadata[0].name
+  jobs_claim      = "agentic-jobs"
+  vortex_claim    = "vortex-context"
+  jobs_base_dir   = "/agentic-storage"
+  vortex_base_dir = "/vortex-context"
 }
 
-resource "random_password" "minio" {
-  count = var.enable_agentic ? 1 : 0
-
-  length  = 32
-  special = false
-}
-
-# S3-compatible storage for agent job artifacts and Vortex analysis context.
-# Azure Blob Storage has no S3 API, so an in-cluster object store is the shortest
-# path on AKS. Two buckets: the two datasets have opposite retention lifecycles.
+# Azure Files over SMB, not MinIO: Azure Blob has no S3-compatible API, and the MinIO
+# container images are no longer anonymously pullable.
 #
-# The MinIO chart requests 16Gi of memory by default, which will not schedule on a
-# mid-sized node.
-resource "helm_release" "minio" {
+# The built-in azurefile-csi class sets no uid/gid/file_mode, so an SMB mount lands as
+# root-owned and the agentic containers (which run as 900, 1000 and 10001) cannot write.
+# This class sets permissive modes instead, which also avoids the shared-fsGroup
+# coordination the chart warns about for block storage.
+resource "kubernetes_storage_class_v1" "agentic_files" {
   count = var.enable_agentic ? 1 : 0
 
-  name       = "minio"
-  repository = "https://charts.min.io/"
-  chart      = "minio"
-  namespace  = local.ns
+  metadata {
+    name = "sonarqube-agentic-files"
+  }
+  storage_provisioner    = "file.csi.azure.com"
+  reclaim_policy         = "Delete"
+  allow_volume_expansion = true
 
-  set = [
-    { name = "mode", value = "standalone" },
-    { name = "rootUser", value = "sonarqube" },
-    { name = "rootPassword", value = random_password.minio[0].result },
-    { name = "resources.requests.memory", value = "1Gi" },
-    { name = "persistence.size", value = "100Gi" },
-    { name = "buckets[0].name", value = "agent-jobs" },
-    { name = "buckets[0].policy", value = "none" },
-    { name = "buckets[1].name", value = "vortex-context" },
-    { name = "buckets[1].policy", value = "none" },
+  parameters = {
+    skuName = "Standard_LRS"
+  }
+
+  mount_options = [
+    "dir_mode=0777",
+    "file_mode=0777",
+    "uid=0",
+    "gid=0",
+    "mfsymlinks",
+    "cache=strict",
+    "actimeo=30",
+    "nosharesock",
   ]
+}
+
+# Job artifacts. ReadWriteMany is required: the Orchestrator and both runtimes mount
+# this at the same time. Each runtime mounts only its own subdirectory.
+resource "kubernetes_persistent_volume_claim_v1" "jobs" {
+  count = var.enable_agentic ? 1 : 0
+
+  metadata {
+    name      = local.jobs_claim
+    namespace = local.ns
+  }
+  spec {
+    access_modes       = ["ReadWriteMany"]
+    storage_class_name = kubernetes_storage_class_v1.agentic_files[0].metadata[0].name
+    resources {
+      requests = {
+        storage = var.jobs_storage_size
+      }
+    }
+  }
+}
+
+# Vortex analyzer context. A separate store from job artifacts: SonarQube Server writes
+# it, Vortex reads it, and the two datasets have opposite retention lifecycles.
+resource "kubernetes_persistent_volume_claim_v1" "vortex" {
+  count = var.enable_agentic ? 1 : 0
+
+  metadata {
+    name      = local.vortex_claim
+    namespace = local.ns
+  }
+  spec {
+    access_modes       = ["ReadWriteMany"]
+    storage_class_name = kubernetes_storage_class_v1.agentic_files[0].metadata[0].name
+    resources {
+      requests = {
+        storage = var.vortex_storage_size
+      }
+    }
+  }
 }

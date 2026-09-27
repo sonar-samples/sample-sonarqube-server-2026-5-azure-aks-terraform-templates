@@ -67,6 +67,18 @@ variable "sandbox_max_nodes" {
   default = 2
 }
 
+variable "jobs_storage_size" {
+  description = "Azure Files share for agent job artifacts. Roughly (jobs/day x retention days x 1MB) plus headroom for in-flight repository archives."
+  type        = string
+  default     = "100Gi"
+}
+
+variable "vortex_storage_size" {
+  description = "Azure Files share for Vortex analyzer context. Considerably larger per project than job artifacts."
+  type        = string
+  default     = "100Gi"
+}
+
 variable "sandbox_runtime_class" {
   description = "RuntimeClass AKS creates for pod sandboxing. Confirm with `kubectl get runtimeclass` — older clusters use kata-mshv-vm-isolation."
   type        = string

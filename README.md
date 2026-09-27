@@ -81,8 +81,8 @@ those images into their own registry for air-gapped or registry-policy reasons.
 | `variables.tf` | All inputs |
 | `main.tf` | Resource group, AKS cluster, pod sandboxing node pool |
 | `postgres.tf` | PostgreSQL Flexible Server, database, firewall rule |
-| `storage.tf` | Namespace and in-cluster MinIO with two buckets |
-| `secrets.tf` | Database, monitoring, signing and storage secrets |
+| `storage.tf` | Namespace, Azure Files StorageClass, and two ReadWriteMany shares |
+| `secrets.tf` | Database, monitoring and agentic signing secrets |
 | `sonarqube.tf` | The SonarQube Helm release |
 | `sonarqube-values.yaml.tftpl` | Helm values, templated on the inputs |
 | `outputs.tf` | Connection details and helper commands |
@@ -161,9 +161,29 @@ release-wide toleration would make SonarQube Server itself eligible for a sandbo
 **Two storage secrets with the same credentials.** The Orchestrator reads `AGENTIC_STORAGE_*`;
 Vortex reads `SONAR_AGENTIC_STORAGE_*`. Both key names are read literally by the chart.
 
-**Two buckets.** Agent job artifacts and Vortex analysis context have opposite retention
+**Azure Files, not MinIO.** Azure Blob Storage has no S3-compatible API, and the MinIO container
+images are no longer anonymously pullable — `quay.io/minio/minio` returns 401 repo-wide, so an
+in-cluster MinIO would require registry credentials before you could finish the install. This
+configuration provisions two `ReadWriteMany` Azure Files shares instead: one for agent job
+artifacts, one for Vortex analyzer context. A filesystem backend needs no storage credentials at
+all, and it leaves the LLM provider as the only entry in the egress allowlist.
+
+**The custom StorageClass is load-bearing.** AKS's built-in `azurefile-csi` sets no `uid`, `gid`
+or `file_mode`, so an SMB mount lands root-owned and the agentic containers — which run as uid
+900, 1000 and 10001 — cannot write to it. `sonarqube-agentic-files` sets `dir_mode=0777` and
+`file_mode=0777`, which also avoids the shared-`fsGroup` coordination the chart warns about for
+block storage. Verified: a non-root container writes to the share successfully. Without this
+class, the PVCs still bind and the pods still start — jobs fail later, on write.
+
+**Subdirectory isolation.** The Orchestrator mounts the jobs share at its root and writes each
+runtime's jobs into a subdirectory named after that runtime. Each runtime mounts only its own
+subdirectory via `subPath`, so neither can see the other's files. Chart validation requires each
+component's `extraVolumeMounts` path to sit at or above its `storage.filesystem.baseDir`.
+
+**Two shares, not one.** Agent job artifacts and Vortex analyzer context have opposite retention
 lifecycles. The `deleteOlderThan` housekeeping settings apply to job artifacts only; a short
-lifecycle policy on the Vortex bucket deletes context that is still current.
+lifecycle policy on the context share deletes context that is still current. SonarQube Server
+writes the context share and Vortex mounts it read-only.
 
 **PostgreSQL uses a public endpoint restricted to the cluster's outbound IP.** This keeps the
 module self-contained. For a delegated subnet with no public endpoint, see
@@ -173,13 +193,31 @@ module self-contained. For a delegated subnet with no public endpoint, see
 
 - **No ingress.** Access is by port-forward. CI scanners cannot reach the server, so this is not a
   complete deployment on its own — add Application Gateway, DNS and TLS from the blueprint above.
-- **Provider credentials come from a cluster created in the same apply.** This resolves on apply
-  but is a known weak point on `terraform destroy` and on a refresh after the cluster is gone. If
-  destroy fails, target the cluster explicitly or point the providers at a kubeconfig.
-- **Not yet applied end to end.** `terraform validate` passes against real provider schemas and
-  the values template renders in both modes, but a full apply has not been run from this
-  configuration. Treat the first apply as a test.
-- **Azure Files is not implemented here.** Only the S3-compatible path is wired up.
+- **The agentic components have not been exercised from this configuration.** A full apply was
+  validated on 2026-09-27 against published chart 2026.4.1, which accepts the agentic values but
+  does not implement them. That proves the infrastructure, the shares, the mounts, the secrets and
+  the release mechanism; it does not prove the agentic containers can read and write those shares.
+  That needs a published chart that ships them.
+- **Azure Files is SMB.** Throughput and IOPS differ from managed disks, and the Standard tier is
+  the default here. Raise to `Premium_LRS` in the StorageClass if job staging is slow.
+
+### Validated on 2026-09-27
+
+A full `apply` and `destroy` cycle in `northeurope` against chart 2026.4.1:
+
+| | |
+| --- | --- |
+| 18-resource apply | completed, `sonarqube_status = "deployed"` |
+| Kubernetes version | resolved from the region default (`1.36.3`) rather than pinned |
+| `node_provisioning_profile { mode = "Manual" }` | accepted by the Azure API |
+| AKS egress IP lookup and PostgreSQL firewall rule | resolved and created |
+| Azure Files RWX shares | both Bound; non-root container write confirmed |
+| Explicit `sonarqube_image_tag` | produced `2026.4.1.126914`, overriding appVersion composition |
+| `terraform destroy` | 17 resources destroyed, resource group removed, no leftovers |
+
+The destroy path completed cleanly despite the providers reading credentials from the cluster
+being deleted. That pattern is still a theoretical weak point on a refresh after the cluster is
+removed out of band, but a normal destroy works.
 
 ## Teardown
 
