@@ -168,9 +168,26 @@ of shell history.
 **Pod Sandboxing, not gVisor.** AKS has no gVisor, and the chart's `gvisor.installer` is a
 privileged DaemonSet that rewrites containerd configuration AKS manages itself. With
 `enable_pod_sandboxing = true` this module sets `gvisor.enabled = false` and uses
-`agentRuntimeSandbox` with the RuntimeClass you supply. Check whether that class carries a
-`scheduling.nodeSelector` — Kubernetes merges it into every runtime pod, and a colliding key makes
-those pods permanently unschedulable.
+`agentRuntimeSandbox` with the RuntimeClass you supply.
+
+**What to set `sandbox_runtime_class` to.** On current AKS the expected value is
+**`kata-vm-isolation`** — that is what Microsoft's documentation uses and what this module was
+validated against on Kubernetes 1.35 and 1.36. Older clusters may instead expose
+`kata-mshv-vm-isolation`, which is the name the SonarQube chart's own comments cite as its AKS
+example. The variable has no default on purpose: the name is a property of your cluster, and a
+wrong value fails at pod start with an unsupported-handler error rather than at plan time. Read it
+off the cluster and use it verbatim:
+
+```sh
+kubectl get runtimeclass
+kubectl get runtimeclass kata-vm-isolation -o jsonpath='{.handler}{"\n"}{.scheduling}'
+```
+
+Also check whether the class carries a `scheduling.nodeSelector`. Kubernetes merges it into every
+runtime pod, so a key that collides with this module's `workload: sandbox` selector makes those
+pods permanently unschedulable. On the validated cluster the class carried
+`kubernetes.azure.com/kata-vm-isolation: "true"`, a different key, so the two combine rather than
+conflict.
 
 **Sandboxing is a toggle, and it interacts with your storage choice.** Set
 `enable_pod_sandboxing = false` and the module creates no sandbox node pool, needs no RuntimeClass,
@@ -186,12 +203,26 @@ traditional containers achieve on Azure Files. **This module's filesystem storag
 exercised with sandboxing enabled** — see Known limitations. An object-storage backend avoids the
 question entirely, because the runtime reaches storage over the network instead of through a mount.
 
-**Azure Files, not MinIO.** Azure Blob Storage has no S3-compatible API, and MinIO container images
-are no longer anonymously pullable (`quay.io/minio/minio` returns 401 repo-wide), so an in-cluster
-MinIO would require registry credentials before the install could finish. The chart describes
-S3-compatible object storage as its recommended production backend for job storage; Azure Files
-over `ReadWriteMany` is a viable AKS option, and it needs no storage credentials at all. Select
-from the released chart's documented storage matrix for your own deployment.
+**Storage: Azure Files here, but Azure Blob is supported.** Sonar's object-store library supports
+S3, **Azure Blob**, Google Cloud Storage, and filesystem/NFS, and the chart's `vortexAnalysis`
+storage type documents `AZURE` alongside `S3`, `FILESYSTEM`, `GCS` and `NFS`. Azure Blob exposes no
+S3-compatible API, but it does not need one — it is a first-class backend in its own right, reached
+through the `AZURE` storage type rather than through S3 emulation.
+
+What the chart exposes today is narrower than what the library supports. The `agentOrchestrator`
+storage block documents only `S3`, `FILESYSTEM` and `NFS`, and renders S3-shaped environment
+variables with no dedicated Azure container or connection-string field, so configuring Blob for the
+Orchestrator currently means setting `storage.type` and injecting the Azure settings through the
+chart's generic `env` passthrough. Check the released chart's storage matrix — this is the kind of
+gap a release closes.
+
+This module implements Azure Files over `ReadWriteMany` because it is what was validated end to
+end, it needs no storage credentials, and it serves both the job store and the Vortex context
+store with one mechanism. It is one supported option, not the only one and not a recommendation
+over object storage — the chart describes S3-compatible object storage as its recommended
+production backend for job storage. MinIO is specifically ruled out here for an unrelated reason:
+its container images are no longer anonymously pullable (`quay.io/minio/minio` returns 401
+repo-wide), so an in-cluster MinIO would need registry credentials before the install could finish.
 
 **The custom StorageClass is load-bearing, and its modes are a reference setting.** AKS's built-in
 `azurefile-csi` sets no `uid`, `gid` or `file_mode`, so an SMB mount lands root-owned and the

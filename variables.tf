@@ -110,9 +110,12 @@ variable "vortex_storage_size" {
   default     = "100Gi"
 }
 
-# No default on purpose. The RuntimeClass name is environment-specific: AKS has used both
-# kata-vm-isolation and kata-mshv-vm-isolation, and the chart documents the latter as its AKS
-# example. Discover it before you apply:
+# No default on purpose. The name is a property of your cluster, and a wrong value fails at pod
+# start with an unsupported-handler error rather than at plan time.
+#
+# Expected value on current AKS: "kata-vm-isolation" — what Microsoft documents and what this
+# module was validated against on Kubernetes 1.35 and 1.36. Older clusters may expose
+# "kata-mshv-vm-isolation" instead. Read it off the cluster and use it verbatim:
 #   kubectl get runtimeclass
 # Pod Sandboxing runs each runtime pod in a VM with its own guest kernel. SonarQube's
 # documentation describes it as the control that keeps LLM-influenced code away from the host, so

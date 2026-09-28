@@ -19,7 +19,7 @@
   "enable_agentic": false,
 
   "enable_pod_sandboxing": true,
-  "sandbox_runtime_class": "",
+  "sandbox_runtime_class": "kata-vm-isolation",
   "runtime_replica_count": 1,
 
   "agentic_images": {
