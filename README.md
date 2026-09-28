@@ -11,9 +11,7 @@ including private networking, Application Gateway and automated TLS, see
 
 ## Release status — read before setting a chart version
 
-A source merge is not a release. The published Helm index is what you install from.
-
-`enable_agentic` therefore defaults to `false`. With it off, this deploys SonarQube Server
+`enable_agentic` defaults to `false`. With it off, this deploys SonarQube Server
 Enterprise on AKS from a published chart — useful and complete on its own.
 
 ### Release acceptance criteria
