@@ -11,12 +11,6 @@ including private networking, Application Gateway and automated TLS, see
 
 ## Release status — read before setting a chart version
 
-**This is a reference deployment design, not a generally available installation path.** Verified
-2026-09-27: the published SonarQube Helm repository exposes 2026.4.1 as its newest package and no
-2026.5.x chart is listed. The agentic chart code on the source repository's `master` branch
-identifies itself as `2026.5.1000`, still declares `appVersion: 2026.4.0`, and ships **blank image
-defaults for all four agentic components**.
-
 A source merge is not a release. The published Helm index is what you install from.
 
 `enable_agentic` therefore defaults to `false`. With it off, this deploys SonarQube Server
