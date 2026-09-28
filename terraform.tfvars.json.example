@@ -17,6 +17,8 @@
   "sonarqube_image_tag": "<approved Server image tag>",
 
   "enable_agentic": false,
+
+  "enable_pod_sandboxing": true,
   "sandbox_runtime_class": "",
   "runtime_replica_count": 1,
 

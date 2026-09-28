@@ -114,8 +114,18 @@ variable "vortex_storage_size" {
 # kata-vm-isolation and kata-mshv-vm-isolation, and the chart documents the latter as its AKS
 # example. Discover it before you apply:
 #   kubectl get runtimeclass
+# Pod Sandboxing runs each runtime pod in a VM with its own guest kernel. SonarQube's
+# documentation describes it as the control that keeps LLM-influenced code away from the host, so
+# it defaults on. The chart supports turning it off — no validation requires a sandbox — and doing
+# so removes the Azure Linux pool, the Gen2 nested-virtualization SKU, the feature registration and
+# the RuntimeClass discovery. Without it, isolation rests on standard container controls only.
+variable "enable_pod_sandboxing" {
+  type    = bool
+  default = true
+}
+
 variable "sandbox_runtime_class" {
-  description = "RuntimeClass to schedule the agent runtimes onto. Required when enable_agentic is true. Discover with `kubectl get runtimeclass`; do not guess."
+  description = "RuntimeClass to schedule the agent runtimes onto. Required when enable_agentic AND enable_pod_sandboxing are true. Discover with `kubectl get runtimeclass`; do not guess."
   type        = string
   default     = ""
 }

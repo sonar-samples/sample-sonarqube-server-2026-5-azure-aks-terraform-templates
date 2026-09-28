@@ -136,7 +136,8 @@ of shell history.
 | `sonarqube_chart_version` | *(required)* | An exact published version, never a floating `2026.5` |
 | `sonarqube_image_tag` | `""` | Approved Server image tag. Required while appVersion lags |
 | `enable_agentic` | `false` | Deploys Vortex, the Orchestrator and both runtimes |
-| `sandbox_runtime_class` | `""` | Required with `enable_agentic`. Discover it; do not guess |
+| `enable_pod_sandboxing` | `true` | VM isolation per runtime pod. Off removes the sandbox pool, RuntimeClass, Azure Linux and nested-virt requirements |
+| `sandbox_runtime_class` | `""` | Required with `enable_agentic` **and** `enable_pod_sandboxing`. Discover it; do not guess |
 | `runtime_replica_count` | `1` | Concurrent jobs per runtime |
 | `agentic_images` | all blank | Required with `enable_agentic`; chart defaults are blank |
 | `llm_allowed_domains` | `["api.anthropic.com"]` | Egress proxy allowlist |
@@ -165,10 +166,25 @@ of shell history.
 ## Design notes
 
 **Pod Sandboxing, not gVisor.** AKS has no gVisor, and the chart's `gvisor.installer` is a
-privileged DaemonSet that rewrites containerd configuration AKS manages itself. This module sets
-`gvisor.enabled = false` and uses `agentRuntimeSandbox` with the RuntimeClass you supply. Check
-whether that class carries a `scheduling.nodeSelector` — Kubernetes merges it into every runtime
-pod, and a colliding key makes those pods permanently unschedulable.
+privileged DaemonSet that rewrites containerd configuration AKS manages itself. With
+`enable_pod_sandboxing = true` this module sets `gvisor.enabled = false` and uses
+`agentRuntimeSandbox` with the RuntimeClass you supply. Check whether that class carries a
+`scheduling.nodeSelector` — Kubernetes merges it into every runtime pod, and a colliding key makes
+those pods permanently unschedulable.
+
+**Sandboxing is a toggle, and it interacts with your storage choice.** Set
+`enable_pod_sandboxing = false` and the module creates no sandbox node pool, needs no RuntimeClass,
+no Azure Linux OS SKU, no Gen2 nested-virtualization SKU and no feature registration; the runtimes
+schedule on the system pool under the default container runtime. The chart supports this — no
+validation requires a sandbox — but SonarQube's own documentation describes the sandbox as the
+control that keeps LLM-influenced code away from the host, so treat turning it off as a security
+decision rather than a simplification, and record it as one.
+
+The interaction that matters: with Pod Sandboxing on, a mounted volume reaches the pod VM through
+`virtiofsd` rather than directly. Microsoft documents that Kata pods may not reach the IOPS
+traditional containers achieve on Azure Files. **This module's filesystem storage has not been
+exercised with sandboxing enabled** — see Known limitations. An object-storage backend avoids the
+question entirely, because the runtime reaches storage over the network instead of through a mount.
 
 **Azure Files, not MinIO.** Azure Blob Storage has no S3-compatible API, and MinIO container images
 are no longer anonymously pullable (`quay.io/minio/minio` returns 401 repo-wide), so an in-cluster
@@ -215,6 +231,12 @@ passwords, and the Helm release.
 - **Fixed runtime replicas keep the sandbox pool provisioned.** `min_count = 0` permits scale-down
   only when nothing schedulable needs the pool. True scale-to-zero requires validated chart
   autoscaling that drives runtime replicas to zero.
+- **Azure Files has not been exercised with Pod Sandboxing enabled.** The validated run used
+  chart 2026.4.1, which deploys no agent runtimes, so no sandboxed pod ever mounted either share.
+  The earlier internal deployment that did run the agentic components used S3 object storage, where
+  the runtime reaches storage over the network and never mounts a volume. Kata plus an SMB volume
+  through `virtiofsd` is therefore untested here, and Microsoft documents IOPS caveats for Kata on
+  Azure Files. Validate it, or use object storage, or run without sandboxing.
 - **The agentic components have not been exercised from this configuration.** A full apply and
   destroy were validated against published chart 2026.4.1, which accepts the agentic values but
   does not implement them. That proves the infrastructure, shares, mounts, secrets and release

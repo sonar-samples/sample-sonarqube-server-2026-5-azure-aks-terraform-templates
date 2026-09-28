@@ -20,8 +20,8 @@ locals {
     # configuration AKS manages itself.
     gvisor = { enabled = false }
     agentRuntimeSandbox = {
-      enabled          = true
-      runtimeClassName = var.sandbox_runtime_class
+      enabled          = var.enable_pod_sandboxing
+      runtimeClassName = var.enable_pod_sandboxing ? var.sandbox_runtime_class : ""
     }
 
     # SonarQube Server writes the analyzer context Vortex restores, so it mounts the same share.
@@ -106,15 +106,16 @@ locals {
       enabled      = true
       image        = image
       replicaCount = var.runtime_replica_count
-      nodeSelector = { workload = "sandbox" }
+      # With sandboxing off there is no sandbox pool, so the runtimes share the system pool.
+      nodeSelector = { workload = var.enable_pod_sandboxing ? "sandbox" : "system" }
       # Per-component, never release-wide: a global toleration would make SonarQube Server
       # itself eligible for a sandbox node.
-      tolerations = [{
+      tolerations = var.enable_pod_sandboxing ? [{
         key      = "workload"
         operator = "Equal"
         value    = "sandbox"
         effect   = "NoSchedule"
-      }]
+      }] : []
       networkPolicy = { enabled = true }
       storage = {
         type       = "FILESYSTEM"
@@ -174,7 +175,7 @@ resource "helm_release" "sonarqube" {
   ])
 
   depends_on = [
-    azurerm_kubernetes_cluster_node_pool.sandbox,
+    azurerm_kubernetes_cluster_node_pool.sandbox, # empty when sandboxing is off
     azurerm_postgresql_flexible_server_firewall_rule.aks,
     kubernetes_persistent_volume_claim_v1.jobs,
     kubernetes_persistent_volume_claim_v1.vortex,

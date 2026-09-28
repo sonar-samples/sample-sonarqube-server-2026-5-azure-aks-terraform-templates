@@ -46,7 +46,7 @@ resource "azurerm_kubernetes_cluster" "this" {
 # fixed runtime replicas those pods are long-lived, so expect this pool to scale up at
 # deploy time and stay provisioned. True scale-to-zero needs validated chart autoscaling.
 resource "azurerm_kubernetes_cluster_node_pool" "sandbox" {
-  count = var.enable_agentic ? 1 : 0
+  count = var.enable_agentic && var.enable_pod_sandboxing ? 1 : 0
 
   name                  = "sandbox"
   kubernetes_cluster_id = azurerm_kubernetes_cluster.this.id
