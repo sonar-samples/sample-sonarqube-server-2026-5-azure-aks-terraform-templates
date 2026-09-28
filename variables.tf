@@ -86,6 +86,18 @@ variable "agentic_images" {
   }
 }
 
+variable "db_username" {
+  type    = string
+  default = "sonarqube"
+}
+
+# Each replica handles one job at a time, so this is your concurrency. Fixed replicas keep the
+# sandbox pool provisioned; see README "Known limitations".
+variable "runtime_replica_count" {
+  type    = number
+  default = 1
+}
+
 variable "jobs_storage_size" {
   description = "Azure Files share for agent job artifacts. Roughly (jobs/day x retention days x 1MB) plus headroom for in-flight repository archives."
   type        = string

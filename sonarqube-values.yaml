@@ -1,0 +1,56 @@
+# Static base values for the SonarQube Helm chart.
+#
+# Everything environment-specific — the database address, the Server image tag, the agentic
+# components, storage paths and the sandbox RuntimeClass — is overlaid by sonarqube.tf via
+# yamlencode, so this file needs no substitution and stays readable.
+
+edition: enterprise
+
+monitoringPasscodeSecretName: "sonarqube-monitoring-passcode"
+monitoringPasscodeSecretKey: "passcode"
+
+# Confine SonarQube Server to the system pool. The sandbox pool is tainted, and the runtime
+# tolerations are set per-component rather than release-wide precisely so this pod can never
+# land there.
+nodeSelector:
+  workload: system
+
+# The single-node chart runs Elasticsearch in-process and keeps its indices on disk; without a
+# volume every restart triggers a full reindex.
+persistence:
+  enabled: true
+  size: 20Gi
+  accessMode: ReadWriteOnce
+
+# Privileged init container that raises vm.max_map_count for Elasticsearch. Requires a namespace
+# that permits privileged pods. To disable it, set the sysctl on the node pool instead and
+# confirm `ulimit -n` >= 65536 inside a running pod first.
+initSysctl:
+  enabled: true
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 4Gi
+    ephemeral-storage: 2Gi
+  limits:
+    cpu: "2"
+    memory: 8Gi
+    ephemeral-storage: 20Gi
+
+service:
+  type: ClusterIP
+  externalPort: 9000
+
+# Ingress is out of scope for this module. Add Application Gateway, DNS and TLS separately.
+ingress:
+  enabled: false
+httproute:
+  enabled: false
+
+serviceAccount:
+  create: true
+  name: sonarqube
+
+prometheusExporter:
+  enabled: false

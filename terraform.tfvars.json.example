@@ -1,0 +1,45 @@
+{
+  "subscription_id": "00000000-0000-0000-0000-000000000000",
+  "location": "westeurope",
+
+  "resource_group_name": "sonarqube-2026-5",
+  "cluster_name": "sonarqube-aks",
+  "postgres_name": "sonarqube-pg-changeme",
+  "db_username": "sonarqube",
+
+  "kubernetes_version": null,
+
+  "system_vm_size": "Standard_D4s_v5",
+  "sandbox_vm_size": "Standard_D8s_v5",
+  "sandbox_max_nodes": 2,
+
+  "sonarqube_chart_version": "<exact published chart version>",
+  "sonarqube_image_tag": "<approved Server image tag>",
+
+  "enable_agentic": false,
+  "sandbox_runtime_class": "",
+  "runtime_replica_count": 1,
+
+  "agentic_images": {
+    "vortex":       { "repository": "", "tag": "" },
+    "orchestrator": { "repository": "", "tag": "" },
+    "hunter":       { "repository": "", "tag": "" },
+    "remediation":  { "repository": "", "tag": "" }
+  },
+
+  "llm_allowed_domains": ["api.anthropic.com"],
+
+  "jobs_storage_size": "100Gi",
+  "vortex_storage_size": "100Gi",
+
+  "share_dir_mode": "0777",
+  "share_file_mode": "0777",
+  "share_gid": "0",
+
+  "enable_settings_encryption": false,
+
+  "tags": {
+    "Team": "",
+    "Owner": ""
+  }
+}
