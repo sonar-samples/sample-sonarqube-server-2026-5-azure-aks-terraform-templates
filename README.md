@@ -9,33 +9,32 @@ components on Azure AKS*. For a SonarQube Server deployment without the agentic 
 including private networking, Application Gateway and automated TLS, see
 [sonarqube-server-azure-aks-installation](https://github.com/sonar-solutions/sonarqube-server-azure-aks-installation).
 
-## Release status — read before setting a chart version
+## Release status
 
-**The GA chart changes are merged; the only remaining gate is publication.** Verified 2026-09-29:
+**Published and verified end to end.** Confirmed 2026-09-29:
 
 | | |
 | --- | --- |
-| [PR #981](https://github.com/SonarSource/helm-chart-sonarqube/pull/981) | merged 2026-09-29 — "Release SonarQube Server 2026.5.0 LTA, support K8s 1.37/OCP 4.22" |
-| `master` `Chart.yaml` | `version: 2026.5.1000`, **`appVersion: 2026.5.0`** |
+| Published Helm index | `2026.5.1000` available from `https://SonarSource.github.io/helm-chart-sonarqube` |
+| `Chart.yaml` | `version: 2026.5.1000`, `appVersion: 2026.5.0` |
 | Agentic image defaults | populated and public — `sonarsource/sonar-vortex`, `sonarqube-agent-orchestrator`, `sonarqube-hunter-agent`, `sonarqube-remediation-agent`, all at `2026.5.0` |
 | `sonarqube:2026.5.0-enterprise` | published |
-| **Published Helm index** | **still 2026.4.1 — no 2026.5.x package yet** |
+| This module | applied against the published package with the agentic stack enabled; Hunter and Remediation ran end to end |
 
-Two earlier problems are now closed. `appVersion` matches the chart version, so `edition:
-enterprise` composes `sonarqube:2026.5.0-enterprise` correctly and `sonarqube_image_tag` is only
-needed to override. And the agentic image defaults are real and public, so `agentic_images` is only
-needed when mirroring into a private registry.
+`appVersion` matches the chart version, so `edition: enterprise` composes
+`sonarqube:2026.5.0-enterprise` on its own and `sonarqube_image_tag` is only needed to override.
+The agentic image defaults are real and public, so `agentic_images` is only needed when mirroring
+into a private registry.
 
-What remains is the release pipeline publishing `2026.5.1000` to
-`https://SonarSource.github.io/helm-chart-sonarqube`. Until it appears there, `terraform apply`
-cannot resolve the chart. A source merge is not a release.
+Note that a published package is not byte-identical to a source build of the same version: four
+templates differ between them. Pin the published version.
 
 `enable_agentic` defaults to `false`. With it off, this deploys SonarQube Server Enterprise on AKS
-from a published chart — useful and complete on its own.
+and nothing else — useful and complete on its own.
 
 ### Release acceptance criteria
 
-One gate and three confirmations. Run them before setting `enable_agentic = true`.
+Sanity checks against your own `helm` client. Run them before setting `enable_agentic = true`.
 
 ```sh
 helm repo add sonarqube https://SonarSource.github.io/helm-chart-sonarqube
@@ -44,7 +43,7 @@ helm repo update
 # THE GATE — is 2026.5.1000 published? Everything else is merged already.
 helm search repo sonarqube/sonarqube --versions | head -20
 
-# Confirmations, all expected to pass on 2026.5.1000
+# All confirmed passing on 2026.5.1000
 helm show chart sonarqube/sonarqube --version 2026.5.1000 | grep -E '^(version|appVersion):'
 helm show values sonarqube/sonarqube --version 2026.5.1000 \
   | grep -E '^(agentOrchestrator|hunterAgent|remediationAgent|vortexAnalysis):'

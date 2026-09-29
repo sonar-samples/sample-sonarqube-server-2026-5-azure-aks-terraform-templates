@@ -32,7 +32,7 @@ variable "kubernetes_version" {
 }
 
 variable "sonarqube_chart_version" {
-  description = "SonarQube Helm chart version. REQUIRED, no default: agentic support depends on a chart published from the merged agentic branch. See README 'Release status' before setting this."
+  description = "SonarQube Helm chart version. REQUIRED, no default. Agentic support needs 2026.5.1000 or later; see README 'Release status'."
   type        = string
 }
 
@@ -46,7 +46,7 @@ variable "sonarqube_image_tag" {
 }
 
 variable "enable_agentic" {
-  description = "Deploy Vortex, the Agent Orchestrator and both agent runtimes. Leave false until the chart version you pinned actually ships the agentic components."
+  description = "Deploy Vortex, the Agent Orchestrator and both agent runtimes. Requires a chart that ships them (2026.5.1000 or later) and an entitlement that enables them."
   type        = bool
   default     = false
 }
