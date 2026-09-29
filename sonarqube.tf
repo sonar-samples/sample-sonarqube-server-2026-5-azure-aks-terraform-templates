@@ -28,7 +28,7 @@ locals {
     # An input the chart requires and does not create. A pre-install hook derives one signing
     # key per communication hop from it.
     agenticSigningSecret = {
-      existingSecret = kubernetes_secret_v1.agentic_instance[0].metadata[0].name
+      existingSecret = one(kubernetes_secret_v1.agentic_instance[*].metadata[0].name)
       key            = "instance-secret"
     }
 
@@ -92,6 +92,10 @@ locals {
   # The chart has no dedicated Azure fields, so azure.container and azure.connection-string go
   # through each component's generic env passthrough. `bucket` is set alongside azure.container
   # because the library documents it as "bucket / container name" for Azure too.
+  # Terraform evaluates BOTH branches of a conditional, so this local is built even when
+  # use_blob is false and these count=0 resources are empty. one() yields null there instead
+  # of failing the plan with "Invalid index" - which it otherwise does for every configuration
+  # that is not agentic-plus-blob, including the default enable_agentic = false.
   storage_blob = {
     # SonarQube Server writes the analyzer context Vortex restores.
     sonarProperties = {
@@ -99,7 +103,7 @@ locals {
       "sonar.agentic.storage.bucket"          = local.vortex_store
       "sonar.agentic.storage.azure.container" = local.vortex_store
     }
-    sonarSecretProperties = kubernetes_secret_v1.azure_storage_props[0].metadata[0].name
+    sonarSecretProperties = one(kubernetes_secret_v1.azure_storage_props[*].metadata[0].name)
 
     vortexAnalysis = {
       storage = {
@@ -116,7 +120,7 @@ locals {
         }, {
         name = "SONAR_AGENTIC_STORAGE_AZURE_CONNECTION_STRING"
         valueFrom = { secretKeyRef = {
-          name = kubernetes_secret_v1.azure_storage[0].metadata[0].name
+          name = one(kubernetes_secret_v1.azure_storage[*].metadata[0].name)
           key  = "SONAR_AGENTIC_STORAGE_AZURE_CONNECTION_STRING"
         } }
       }]
@@ -133,7 +137,7 @@ locals {
         }, {
         name = "SONAR_AGENTIC_ORCHESTRATOR_STORAGE_AZURE_CONNECTION_STRING"
         valueFrom = { secretKeyRef = {
-          name = kubernetes_secret_v1.azure_storage[0].metadata[0].name
+          name = one(kubernetes_secret_v1.azure_storage[*].metadata[0].name)
           key  = "SONAR_AGENTIC_ORCHESTRATOR_STORAGE_AZURE_CONNECTION_STRING"
         } }
       }]
