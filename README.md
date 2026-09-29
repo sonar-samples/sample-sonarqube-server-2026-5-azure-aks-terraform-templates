@@ -64,7 +64,7 @@ is unpublished when it is not.
 | System node pool | Virtual Machine Scale Sets | SonarQube Server, Orchestrator, Vortex, egress proxy |
 | Sandbox node pool | VMSS with Pod Sandboxing | Agent runtimes only; tainted, Azure Linux, Gen2 nested-virt |
 | PostgreSQL | Database for PostgreSQL Flexible Server | SonarQube database, shared with the Orchestrator |
-| Two file shares | Azure Files via CSI, ReadWriteMany | Agent job artifacts, and Vortex analyzer context |
+| Blob storage account | Storage account with two containers | Agent job artifacts, and Vortex analyzer context (default) |
 | SonarQube release | Helm | The official chart from the SonarSource repository |
 
 ## Prerequisites
@@ -303,6 +303,10 @@ passwords, and the Helm release.
   mechanism — not that the agentic containers can read and write those shares.
 - **Azure Files is SMB.** Throughput and IOPS differ from managed disks, and Standard tier is the
   default here. Raise to `Premium_LRS` in the StorageClass if job staging is slow.
+- **Reusing a storage account name straight after a destroy leaves stale DNS.** Azure may keep
+  resolving the name to the deleted account's scale unit for a while, so `az storage` calls from
+  your machine fail with `ResourceNotFound` against storage the cluster is using happily. Confirm
+  from inside the cluster before believing it, or pick a fresh `storage_account_name` per run.
 - **SonarQube Server cannot receive the blob connection string through an environment
   variable.** The object-store library reads `azure.connection-string`, hyphenated. The
   Orchestrator and Vortex are Spring Boot and bind it from `SONAR_..._CONNECTION_STRING` through
@@ -332,8 +336,8 @@ band; if you hit it, destroy `helm_release.sonarqube` first.
 ### Validated on 2026-09-29 — agentic stack on `azureblob`
 
 A full apply in `northeurope` with `enable_agentic = true`, `enable_pod_sandboxing = true` and
-`storage_backend = "azureblob"`, against chart `2026.5.1000` built from source (the package was
-not yet published):
+`storage_backend = "azureblob"`, first against chart `2026.5.1000` built from source and then
+re-verified against the **published** `2026.5.1000` package once it shipped:
 
 | | |
 | --- | --- |
@@ -344,16 +348,29 @@ not yet published):
 | Kata isolation | genuine — guest kernel `6.6.137.mshv1-1.azl3` vs host `6.6.137.mshv2-2.azl3` |
 | Runtime storage | none; the only volume on a runtime pod is `agentic-keys` |
 | Repeat `terraform plan` | `No changes` |
+| Published chart | live `helm upgrade` from the source build onto the released package: all pods `1/1`, zero storage errors, Kata and `sonarSecretProperties` wiring unchanged |
+| Hunter and Remediation | **executed end to end** against Azure Blob with Pod Sandboxing on, via an Anthropic provider through the egress proxy |
 
 Two defects surfaced only at runtime, neither reachable by `terraform validate` or
 `helm template`: the Server's connection-string binding (above), and the sandbox pool pinning
 `node_count = 0` against its own autoscaler, which scaled the pool back to zero on the *second*
 apply and evicted both runtimes. Both are fixed here.
 
-Not covered: a Hunter or Remediation job executed end to end, which needs a licence, an LLM
-provider and a bound project.
+The published package is not byte-identical to a source build of the same version: four templates
+differ, including `_pod.tpl` and `validation.yaml`. The wiring this module depends on is identical
+in both, and the upgrade above confirms it on the released artifact.
+
+Still not covered: the 2026.4 to 2026.5 upgrade path, `azurefiles` with Pod Sandboxing, and
+backup/restore.
 
 ## Upgrade
+
+**The Server will stop being a StatefulSet.** Installing 2026.5.1000 emits two deprecation
+warnings: `deploymentType` is going away and the Server becomes a `Deployment`, with the strategy
+hard-coded to `Recreate`. Today the Server pod is `sonarqube-sonarqube-0`; after that change the
+name gains a random suffix. Anything addressing the pod by that literal name — scripts, runbooks,
+`kubectl exec` one-liners, log queries — breaks on the chart version that flips it. Address the
+StatefulSet or a label selector instead.
 
 Change `sonarqube_chart_version` to the new published version, re-confirm the acceptance criteria
 above, and re-apply. Follow the released chart's upgrade notes, and back up the database and both
