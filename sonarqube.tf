@@ -107,6 +107,10 @@ locals {
       storage = {
         type   = "AZURE"
         bucket = local.vortex_store
+        # Required by chart validation for any non-filesystem type, even though the library
+        # documents region as an S3-only setting and AzureObjectStore ignores it. The
+        # Orchestrator never trips this because its own region defaults to us-east-1.
+        region = var.location
       }
       env = [{
         name  = "SONAR_AGENTIC_STORAGE_AZURE_CONTAINER"
