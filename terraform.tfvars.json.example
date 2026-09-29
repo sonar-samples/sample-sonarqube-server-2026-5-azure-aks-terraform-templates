@@ -13,8 +13,8 @@
   "sandbox_vm_size": "Standard_D8s_v5",
   "sandbox_max_nodes": 2,
 
-  "sonarqube_chart_version": "<exact published chart version>",
-  "sonarqube_image_tag": "<approved Server image tag>",
+  "sonarqube_chart_version": "2026.5.1000",
+  "sonarqube_image_tag": "",
 
   "enable_agentic": false,
 

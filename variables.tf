@@ -67,11 +67,15 @@ variable "sandbox_max_nodes" {
   default = 2
 }
 
-# The chart ships BLANK image defaults for all four agentic components, so these are required
-# when enable_agentic is true — chart validation fails with "image.repository is not set"
-# otherwise. Take them from the release's approved image manifest; do not guess tags.
+# OPTIONAL as of chart 2026.5.1000, which ships working public defaults:
+#   sonarsource/sonar-vortex:2026.5.0
+#   sonarsource/sonarqube-agent-orchestrator:2026.5.0
+#   sonarsource/sonarqube-hunter-agent:2026.5.0
+#   sonarsource/sonarqube-remediation-agent:2026.5.0
+# Leave a repository empty and the chart default is used. Set one only to override — for example
+# when mirroring official images into a private registry.
 variable "agentic_images" {
-  description = "Release-approved image references for each agentic component."
+  description = "Optional image overrides per agentic component. Empty repository = use the chart default."
   type = object({
     vortex       = object({ repository = string, tag = string })
     orchestrator = object({ repository = string, tag = string })

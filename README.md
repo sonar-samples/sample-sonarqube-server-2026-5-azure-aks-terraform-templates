@@ -11,39 +11,49 @@ including private networking, Application Gateway and automated TLS, see
 
 ## Release status — read before setting a chart version
 
-`enable_agentic` defaults to `false`. With it off, this deploys SonarQube Server
-Enterprise on AKS from a published chart — useful and complete on its own.
+**The GA chart changes are merged; the only remaining gate is publication.** Verified 2026-09-29:
+
+| | |
+| --- | --- |
+| [PR #981](https://github.com/SonarSource/helm-chart-sonarqube/pull/981) | merged 2026-09-29 — "Release SonarQube Server 2026.5.0 LTA, support K8s 1.37/OCP 4.22" |
+| `master` `Chart.yaml` | `version: 2026.5.1000`, **`appVersion: 2026.5.0`** |
+| Agentic image defaults | populated and public — `sonarsource/sonar-vortex`, `sonarqube-agent-orchestrator`, `sonarqube-hunter-agent`, `sonarqube-remediation-agent`, all at `2026.5.0` |
+| `sonarqube:2026.5.0-enterprise` | published |
+| **Published Helm index** | **still 2026.4.1 — no 2026.5.x package yet** |
+
+Two earlier problems are now closed. `appVersion` matches the chart version, so `edition:
+enterprise` composes `sonarqube:2026.5.0-enterprise` correctly and `sonarqube_image_tag` is only
+needed to override. And the agentic image defaults are real and public, so `agentic_images` is only
+needed when mirroring into a private registry.
+
+What remains is the release pipeline publishing `2026.5.1000` to
+`https://SonarSource.github.io/helm-chart-sonarqube`. Until it appears there, `terraform apply`
+cannot resolve the chart. A source merge is not a release.
+
+`enable_agentic` defaults to `false`. With it off, this deploys SonarQube Server Enterprise on AKS
+from a published chart — useful and complete on its own.
 
 ### Release acceptance criteria
 
-Run all four before setting `enable_agentic = true`. Every one must pass.
+One gate and three confirmations. Run them before setting `enable_agentic = true`.
 
 ```sh
 helm repo add sonarqube https://SonarSource.github.io/helm-chart-sonarqube
 helm repo update
 
-# 1. A 2026.5.x chart is published
+# THE GATE — is 2026.5.1000 published? Everything else is merged already.
 helm search repo sonarqube/sonarqube --versions | head -20
 
-# 2. appVersion is 2026.5, not a stale 2026.4
-helm show chart sonarqube/sonarqube --version <version> | grep -E '^(version|appVersion):'
-
-# 3. All four agentic value blocks exist
-helm show values sonarqube/sonarqube --version <version> \
+# Confirmations, all expected to pass on 2026.5.1000
+helm show chart sonarqube/sonarqube --version 2026.5.1000 | grep -E '^(version|appVersion):'
+helm show values sonarqube/sonarqube --version 2026.5.1000 \
   | grep -E '^(agentOrchestrator|hunterAgent|remediationAgent|vortexAnalysis):'
-
-# 4. The Enterprise image resolves to 2026.5
-helm template sonarqube sonarqube/sonarqube --version <version> \
+helm template sonarqube sonarqube/sonarqube --version 2026.5.1000 \
   --set edition=enterprise | grep -E 'image:.*sonarqube'
 ```
 
-Criterion 3 matters because a chart without those blocks does not fail — it installs SonarQube
-Server and silently ignores every agentic value. Criterion 2 matters because the chart composes the
-Server image tag from `Chart.AppVersion` when `edition` is set and no tag is given, so a stale
-appVersion deploys the wrong Server with no error. `sonarqube_image_tag` exists to override that.
-
-You also need an approved image manifest for the four agentic components. The chart's defaults are
-blank and validation rejects a blank repository, so there is no safe fallback.
+`helm repo update` first, or a cached index will report the old version and you will conclude it
+is unpublished when it is not.
 
 ## Infrastructure Components
 
@@ -133,13 +143,13 @@ of shell history.
 | `system_vm_size` | `Standard_D4s_v5` | |
 | `sandbox_vm_size` | `Standard_D8s_v5` | Must be Gen2 with nested virtualization |
 | `sandbox_max_nodes` | `2` | |
-| `sonarqube_chart_version` | *(required)* | An exact published version, never a floating `2026.5` |
-| `sonarqube_image_tag` | `""` | Approved Server image tag. Required while appVersion lags |
+| `sonarqube_chart_version` | *(required)* | An exact published version — `2026.5.1000` once the index carries it |
+| `sonarqube_image_tag` | `""` | Optional override. Empty takes the chart default, correct as of appVersion 2026.5.0 |
 | `enable_agentic` | `false` | Deploys Vortex, the Orchestrator and both runtimes |
 | `enable_pod_sandboxing` | `true` | VM isolation per runtime pod. Off removes the sandbox pool, RuntimeClass, Azure Linux and nested-virt requirements |
-| `sandbox_runtime_class` | `""` | Required with `enable_agentic` **and** `enable_pod_sandboxing`. Discover it; do not guess |
+| `sandbox_runtime_class` | `""` | Required with `enable_agentic` **and** `enable_pod_sandboxing`. `kata-vm-isolation` on current AKS |
 | `runtime_replica_count` | `1` | Concurrent jobs per runtime |
-| `agentic_images` | all blank | Required with `enable_agentic`; chart defaults are blank |
+| `agentic_images` | all blank | Optional overrides. Blank repository takes the chart default; set only when mirroring |
 | `llm_allowed_domains` | `["api.anthropic.com"]` | Egress proxy allowlist |
 | `jobs_storage_size` | `100Gi` | Azure Files share for job artifacts |
 | `vortex_storage_size` | `100Gi` | Azure Files share for analyzer context |
@@ -170,8 +180,9 @@ privileged DaemonSet that rewrites containerd configuration AKS manages itself. 
 `enable_pod_sandboxing = true` this module sets `gvisor.enabled = false` and uses
 `agentRuntimeSandbox` with the RuntimeClass you supply.
 
-**What to set `sandbox_runtime_class` to.** On current AKS the expected value is
-**`kata-vm-isolation`** — that is what Microsoft's documentation uses and what this module was
+**What to set `sandbox_runtime_class` to.** **`kata-vm-isolation`** — confirmed by SonarSource
+engineering as the Azure configuration (`agentRuntimeSandbox.enabled: true`,
+`runtimeClassName: kata-vm-isolation`), matching Microsoft's documentation and what this module was
 validated against on Kubernetes 1.35 and 1.36. Older clusters may instead expose
 `kata-mshv-vm-isolation`, which is the name the SonarQube chart's own comments cite as its AKS
 example. The variable has no default on purpose: the name is a property of your cluster, and a

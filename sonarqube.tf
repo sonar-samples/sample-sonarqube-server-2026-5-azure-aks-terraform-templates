@@ -7,6 +7,15 @@
 # is a real conditional rather than a template directive.
 
 locals {
+  # Emit an image override only when one is supplied. As of chart 2026.5.1000 the chart ships
+  # working public defaults, so overriding them with empty strings would fail validation. A `for`
+  # with `if` is used rather than a ternary because a conditional needs both branches to share a
+  # type, and "a map with an image key" and "an empty map" do not.
+  image_override = {
+    for name, img in var.agentic_images :
+    name => { for k, v in { image = img } : k => v if img.repository != "" }
+  }
+
   agentic = {
     # An input the chart requires and does not create. A pre-install hook derives one signing
     # key per communication hop from it.
@@ -40,9 +49,8 @@ locals {
 
     # Not an agent — a long-lived analysis service. bucket/region are meaningless for a file
     # backend and the chart gates them on storage type.
-    vortexAnalysis = {
+    vortexAnalysis = merge(local.image_override.vortex, {
       enabled      = true
-      image        = var.agentic_images.vortex
       nodeSelector = { workload = "system" }
       storage = {
         type       = "FILESYSTEM"
@@ -57,13 +65,12 @@ locals {
         mountPath = local.vortex_base_dir
         readOnly  = true
       }]
-    }
+    })
 
     # Mounts the jobs share at its root and writes each runtime's jobs into a subdirectory
     # named after that runtime.
-    agentOrchestrator = {
+    agentOrchestrator = merge(local.image_override.orchestrator, {
       enabled      = true
-      image        = var.agentic_images.orchestrator
       scheduler    = { enabled = true }
       nodeSelector = { workload = "system" }
       storage = {
@@ -78,7 +85,7 @@ locals {
         name      = "agentic-jobs"
         mountPath = local.jobs_base_dir
       }]
-    }
+    })
 
     hunterAgent      = local.runtime_values["hunter"]
     remediationAgent = local.runtime_values["remediation"]
@@ -99,38 +106,37 @@ locals {
   # Each runtime mounts ONLY its own subtree, so neither can see the other's files. Chart
   # validation requires the mountPath to sit at or above storage.filesystem.baseDir.
   runtime_values = {
-    for family, image in {
-      hunter      = var.agentic_images.hunter
-      remediation = var.agentic_images.remediation
-      } : family => {
-      enabled      = true
-      image        = image
-      replicaCount = var.runtime_replica_count
-      # With sandboxing off there is no sandbox pool, so the runtimes share the system pool.
-      nodeSelector = { workload = var.enable_pod_sandboxing ? "sandbox" : "system" }
-      # Per-component, never release-wide: a global toleration would make SonarQube Server
-      # itself eligible for a sandbox node.
-      tolerations = var.enable_pod_sandboxing ? [{
-        key      = "workload"
-        operator = "Equal"
-        value    = "sandbox"
-        effect   = "NoSchedule"
-      }] : []
-      networkPolicy = { enabled = true }
-      storage = {
-        type       = "FILESYSTEM"
-        filesystem = { baseDir = "${local.jobs_base_dir}/${family}" }
-      }
-      extraVolumes = [{
-        name                  = "agentic-jobs"
-        persistentVolumeClaim = { claimName = local.jobs_claim }
-      }]
-      extraVolumeMounts = [{
-        name      = "agentic-jobs"
-        mountPath = "${local.jobs_base_dir}/${family}"
-        subPath   = family
-      }]
-    }
+    for family, override in {
+      hunter      = local.image_override.hunter
+      remediation = local.image_override.remediation
+      } : family => merge(override, {
+        enabled      = true
+        replicaCount = var.runtime_replica_count
+        # With sandboxing off there is no sandbox pool, so the runtimes share the system pool.
+        nodeSelector = { workload = var.enable_pod_sandboxing ? "sandbox" : "system" }
+        # Per-component, never release-wide: a global toleration would make SonarQube Server
+        # itself eligible for a sandbox node.
+        tolerations = var.enable_pod_sandboxing ? [{
+          key      = "workload"
+          operator = "Equal"
+          value    = "sandbox"
+          effect   = "NoSchedule"
+        }] : []
+        networkPolicy = { enabled = true }
+        storage = {
+          type       = "FILESYSTEM"
+          filesystem = { baseDir = "${local.jobs_base_dir}/${family}" }
+        }
+        extraVolumes = [{
+          name                  = "agentic-jobs"
+          persistentVolumeClaim = { claimName = local.jobs_claim }
+        }]
+        extraVolumeMounts = [{
+          name      = "agentic-jobs"
+          mountPath = "${local.jobs_base_dir}/${family}"
+          subPath   = family
+        }]
+    })
   }
 }
 
