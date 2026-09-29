@@ -360,10 +360,41 @@ The published package is not byte-identical to a source build of the same versio
 differ, including `_pod.tpl` and `validation.yaml`. The wiring this module depends on is identical
 in both, and the upgrade above confirms it on the released artifact.
 
-Still not covered: the 2026.4 to 2026.5 upgrade path, `azurefiles` with Pod Sandboxing, and
-backup/restore.
+The 2026.4 to 2026.5 upgrade path is now covered as well - see Upgrade. Still not covered:
+`azurefiles` with Pod Sandboxing, and backup/restore.
 
 ## Upgrade
+
+**Upgrading with the agentic components enabled needs a manual step inside the apply window.**
+SonarQube does not migrate its own schema. After the Helm upgrade the Server restarts into
+`DB_MIGRATION_NEEDED` and serves nothing useful, yet its readiness probe still passes, so
+Kubernetes and Helm both report the pod healthy. Vortex, which health-checks against the Server,
+stays un-ready for as long as that lasts, and `helm upgrade` blocks waiting for it. Trigger the
+migration and everything converges; leave it and the apply fails on the Helm timeout (30 minutes
+here) even though nothing is actually broken.
+
+Avoid the race by sequencing the upgrade rather than doing it in one shot:
+
+```sh
+# 1. Upgrade the Server alone.
+#    Set enable_agentic = false, then:
+terraform apply
+
+# 2. Migrate the database. Browse /setup, or:
+curl -s -u <admin>:<password> -X POST http://<host>/api/system/migrate_db
+curl -s http://<host>/api/system/db_migration_status   # wait for MIGRATION_SUCCEEDED
+curl -s http://<host>/api/system/status                # wait for UP
+
+# 3. Re-enable the agentic components.
+#    Set enable_agentic = true, then:
+terraform apply
+```
+
+Verified on 2026-09-29: a 2026.4.1 install upgraded in place to 2026.5.1000 with the agentic stack
+switched on in the same apply. The instance id was unchanged across the upgrade, confirming a real
+migration rather than a fresh database, and the sandbox node pool was added to the running cluster.
+The single-shot apply only succeeded because the migration was triggered while Helm was still
+waiting.
 
 **The Server will stop being a StatefulSet.** Installing 2026.5.1000 emits two deprecation
 warnings: `deploymentType` is going away and the Server becomes a `Deployment`, with the strategy
