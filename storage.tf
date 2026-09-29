@@ -79,6 +79,26 @@ resource "kubernetes_secret_v1" "azure_storage" {
   }
 }
 
+# The Orchestrator and Vortex are Spring Boot services, so relaxed binding maps
+# SONAR_..._CONNECTION_STRING onto azure.connection-string and the env vars above bind.
+# SonarQube Server is not: it maps SONAR_X_Y to sonar.x.y and can never produce the
+# hyphen in `connection-string`, so that env var silently never binds and the server
+# builds a BlobServiceClient with no connection string ("Invalid connection string").
+# sonarSecretProperties merges a secret into sonar.properties via the concat-properties
+# init container - the only way to pass a hyphenated property holding a secret value
+# without exposing it in a ConfigMap.
+resource "kubernetes_secret_v1" "azure_storage_props" {
+  count = local.use_blob ? 1 : 0
+
+  metadata {
+    name      = "agentic-storage-azure-props"
+    namespace = local.ns
+  }
+  data = {
+    "secret.properties" = "sonar.agentic.storage.azure.connection-string=${azurerm_storage_account.agentic[0].primary_connection_string}\n"
+  }
+}
+
 # ---------------------------------------------------------------------------
 # Azure Files  (storage_backend = "azurefiles")
 # ---------------------------------------------------------------------------

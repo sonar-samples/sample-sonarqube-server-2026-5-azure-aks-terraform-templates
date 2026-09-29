@@ -99,9 +99,7 @@ locals {
       "sonar.agentic.storage.bucket"          = local.vortex_store
       "sonar.agentic.storage.azure.container" = local.vortex_store
     }
-    extraConfig = {
-      secrets = [kubernetes_secret_v1.azure_storage[0].metadata[0].name]
-    }
+    sonarSecretProperties = kubernetes_secret_v1.azure_storage_props[0].metadata[0].name
 
     vortexAnalysis = {
       storage = {

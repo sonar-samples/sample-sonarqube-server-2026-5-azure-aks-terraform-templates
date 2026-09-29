@@ -22,6 +22,14 @@ resource "azurerm_kubernetes_cluster" "this" {
     vm_size     = var.system_vm_size
     node_count  = 2
     node_labels = { workload = "system" }
+
+    # Azure applies these defaults server-side. Declaring them keeps a repeat plan
+    # clean instead of showing a perpetual "remove upgrade_settings" diff.
+    upgrade_settings {
+      drain_timeout_in_minutes      = 0
+      max_surge                     = "10%"
+      node_soak_duration_in_minutes = 0
+    }
   }
 
   network_profile {
@@ -66,4 +74,17 @@ resource "azurerm_kubernetes_cluster_node_pool" "sandbox" {
   node_labels = { workload = "sandbox" }
   node_taints = ["workload=sandbox:NoSchedule"]
   tags        = var.tags
+
+  upgrade_settings {
+    drain_timeout_in_minutes      = 0
+    max_surge                     = "10%"
+    node_soak_duration_in_minutes = 0
+  }
+
+  # node_count is the initial size only. Once the cluster autoscaler owns the pool it
+  # moves the count to meet demand, so leaving it in the diff makes every later apply
+  # scale the pool back to zero and evict the running agent runtimes.
+  lifecycle {
+    ignore_changes = [node_count]
+  }
 }
