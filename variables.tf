@@ -102,6 +102,39 @@ variable "runtime_replica_count" {
   default = 1
 }
 
+# Which storage backend the agentic components use.
+#
+#   azureblob  - Azure Blob Storage via the AZURE provider. The runtime is handed native SAS
+#                presigned URLs scoped to one object and one verb, expiring after the presign
+#                TTL, and mounts nothing. Stronger isolation for an untrusted runtime, and it
+#                avoids the Pod Sandboxing volume question entirely. Authentication is
+#                connection-string only - there is no Managed Identity path - so a storage
+#                account key is held in a Kubernetes secret.
+#
+#   azurefiles - Azure Files over ReadWriteMany via the FILESYSTEM provider. The runtime is
+#                handed a file:// path and mounts the share, so isolation rests on mount scoping
+#                and permissions rather than on signed URLs.
+#
+# Defaults to azurefiles because that is the path validated end to end here. Sonar's own
+# object-store documentation notes that Azure and GCS are "wired but least-exercised", with
+# S3/MinIO the primary validated path.
+variable "storage_backend" {
+  type    = string
+  default = "azurefiles"
+
+  validation {
+    condition     = contains(["azurefiles", "azureblob"], var.storage_backend)
+    error_message = "storage_backend must be azurefiles or azureblob."
+  }
+}
+
+# Required when storage_backend is azureblob. Globally unique, 3-24 lowercase alphanumerics.
+variable "storage_account_name" {
+  type    = string
+  default = ""
+}
+
+# Only used when storage_backend is azurefiles.
 variable "jobs_storage_size" {
   description = "Azure Files share for agent job artifacts. Roughly (jobs/day x retention days x 1MB) plus headroom for in-flight repository archives."
   type        = string

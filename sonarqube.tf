@@ -2,20 +2,28 @@
 # SonarQube Helm release
 # --------------------------------------------------------------------------
 #
-# Static values live in sonarqube-values.yaml. Everything environment-specific is overlaid
-# here with yamlencode, so there is no string templating to get wrong and the agentic block
-# is a real conditional rather than a template directive.
+# Static values live in sonarqube-values.yaml. Everything environment-specific is overlaid here
+# as separate YAML documents, which Helm merges in order. Each optional block is emitted on its
+# own rather than merged into one map, because a Terraform conditional requires both branches to
+# share a type and these do not.
 
 locals {
-  # Emit an image override only when one is supplied. As of chart 2026.5.1000 the chart ships
-  # working public defaults, so overriding them with empty strings would fail validation. A `for`
-  # with `if` is used rather than a ternary because a conditional needs both branches to share a
-  # type, and "a map with an image key" and "an empty map" do not.
+  # Emit an image override only when one is supplied. The chart ships working public defaults as
+  # of 2026.5.0, so overriding them with empty strings would fail validation. A `for` with `if` is
+  # used rather than a ternary for the same type-unification reason as above.
   image_override = {
     for name, img in var.agentic_images :
     name => { for k, v in { image = img } : k => v if img.repository != "" }
   }
 
+  # Runtime egress. On an object backend the runtime fetches presigned URLs over HTTPS, so the
+  # storage host must be reachable; on a filesystem backend storage is a mount and needs nothing.
+  egress_domains = concat(
+    var.llm_allowed_domains,
+    local.use_blob ? [local.blob_host] : [],
+  )
+
+  # ---- Backend-independent agentic configuration -------------------------------------------
   agentic = {
     # An input the chart requires and does not create. A pre-install hook derives one signing
     # key per communication hop from it.
@@ -24,77 +32,32 @@ locals {
       key            = "instance-secret"
     }
 
-    # AKS Pod Sandboxing, not gVisor. These are different mechanisms: the chart's gvisor path
-    # installs its own runtime with a privileged DaemonSet that would fight the containerd
-    # configuration AKS manages itself.
+    # AKS Pod Sandboxing, not gVisor. The chart's gvisor path installs its own runtime with a
+    # privileged DaemonSet that would fight the containerd configuration AKS manages itself.
     gvisor = { enabled = false }
     agentRuntimeSandbox = {
       enabled          = var.enable_pod_sandboxing
       runtimeClassName = var.enable_pod_sandboxing ? var.sandbox_runtime_class : ""
     }
 
-    # SonarQube Server writes the analyzer context Vortex restores, so it mounts the same share.
-    sonarProperties = {
-      "sonar.agentic.storage.type"                = "FILESYSTEM"
-      "sonar.agentic.storage.filesystem.base-dir" = local.vortex_base_dir
-    }
-    extraVolumes = [{
-      name                  = "vortex-context"
-      persistentVolumeClaim = { claimName = local.vortex_claim }
-    }]
-    extraVolumeMounts = [{
-      name      = "vortex-context"
-      mountPath = local.vortex_base_dir
-    }]
-
-    # Not an agent — a long-lived analysis service. bucket/region are meaningless for a file
-    # backend and the chart gates them on storage type.
     vortexAnalysis = merge(local.image_override.vortex, {
       enabled      = true
       nodeSelector = { workload = "system" }
-      storage = {
-        type       = "FILESYSTEM"
-        filesystem = { baseDir = local.vortex_base_dir }
-      }
-      extraVolumes = [{
-        name                  = "vortex-context"
-        persistentVolumeClaim = { claimName = local.vortex_claim }
-      }]
-      extraVolumeMounts = [{
-        name      = "vortex-context"
-        mountPath = local.vortex_base_dir
-        readOnly  = true
-      }]
     })
 
-    # Mounts the jobs share at its root and writes each runtime's jobs into a subdirectory
-    # named after that runtime.
     agentOrchestrator = merge(local.image_override.orchestrator, {
       enabled      = true
       scheduler    = { enabled = true }
       nodeSelector = { workload = "system" }
-      storage = {
-        type       = "FILESYSTEM"
-        filesystem = { baseDir = local.jobs_base_dir }
-      }
-      extraVolumes = [{
-        name                  = "agentic-jobs"
-        persistentVolumeClaim = { claimName = local.jobs_claim }
-      }]
-      extraVolumeMounts = [{
-        name      = "agentic-jobs"
-        mountPath = local.jobs_base_dir
-      }]
     })
 
     hunterAgent      = local.runtime_values["hunter"]
     remediationAgent = local.runtime_values["remediation"]
 
-    # No enabled flag — the proxy renders whenever a runtime does. Confirm it exists in the
-    # chart version you pinned. With a filesystem backend only the LLM provider needs allowing;
-    # add identity, DevOps and storage endpoints if your setup reaches them.
+    # No enabled flag — the proxy renders whenever a runtime does. Confirm it exists in the chart
+    # version you pinned, and test an allowed and a denied destination.
     agentEgressProxy = {
-      allowedDomains = var.llm_allowed_domains
+      allowedDomains = local.egress_domains
       networkPolicy = {
         enabled            = true
         egressPorts        = [80, 443]
@@ -103,8 +66,6 @@ locals {
     }
   }
 
-  # Each runtime mounts ONLY its own subtree, so neither can see the other's files. Chart
-  # validation requires the mountPath to sit at or above storage.filesystem.baseDir.
   runtime_values = {
     for family, override in {
       hunter      = local.image_override.hunter
@@ -123,20 +84,130 @@ locals {
           effect   = "NoSchedule"
         }] : []
         networkPolicy = { enabled = true }
-        storage = {
-          type       = "FILESYSTEM"
-          filesystem = { baseDir = "${local.jobs_base_dir}/${family}" }
-        }
-        extraVolumes = [{
-          name                  = "agentic-jobs"
-          persistentVolumeClaim = { claimName = local.jobs_claim }
-        }]
-        extraVolumeMounts = [{
-          name      = "agentic-jobs"
-          mountPath = "${local.jobs_base_dir}/${family}"
-          subPath   = family
-        }]
     })
+  }
+
+  # ---- Azure Blob: presigned SAS locators, nothing mounted ----------------------------------
+  #
+  # The chart has no dedicated Azure fields, so azure.container and azure.connection-string go
+  # through each component's generic env passthrough. `bucket` is set alongside azure.container
+  # because the library documents it as "bucket / container name" for Azure too.
+  storage_blob = {
+    # SonarQube Server writes the analyzer context Vortex restores.
+    sonarProperties = {
+      "sonar.agentic.storage.type"            = "AZURE"
+      "sonar.agentic.storage.bucket"          = local.vortex_store
+      "sonar.agentic.storage.azure.container" = local.vortex_store
+    }
+    extraConfig = {
+      secrets = [kubernetes_secret_v1.azure_storage[0].metadata[0].name]
+    }
+
+    vortexAnalysis = {
+      storage = {
+        type   = "AZURE"
+        bucket = local.vortex_store
+      }
+      env = [{
+        name  = "SONAR_AGENTIC_STORAGE_AZURE_CONTAINER"
+        value = local.vortex_store
+        }, {
+        name = "SONAR_AGENTIC_STORAGE_AZURE_CONNECTION_STRING"
+        valueFrom = { secretKeyRef = {
+          name = kubernetes_secret_v1.azure_storage[0].metadata[0].name
+          key  = "SONAR_AGENTIC_STORAGE_AZURE_CONNECTION_STRING"
+        } }
+      }]
+    }
+
+    agentOrchestrator = {
+      storage = {
+        type   = "AZURE"
+        bucket = local.jobs_store
+      }
+      env = [{
+        name  = "SONAR_AGENTIC_ORCHESTRATOR_STORAGE_AZURE_CONTAINER"
+        value = local.jobs_store
+        }, {
+        name = "SONAR_AGENTIC_ORCHESTRATOR_STORAGE_AZURE_CONNECTION_STRING"
+        valueFrom = { secretKeyRef = {
+          name = kubernetes_secret_v1.azure_storage[0].metadata[0].name
+          key  = "SONAR_AGENTIC_ORCHESTRATOR_STORAGE_AZURE_CONNECTION_STRING"
+        } }
+      }]
+    }
+    # The runtimes need no storage configuration at all: they act on locators.
+  }
+
+  # ---- Azure Files: file:// locators on a shared mount --------------------------------------
+  storage_files = {
+    sonarProperties = {
+      "sonar.agentic.storage.type"                = "FILESYSTEM"
+      "sonar.agentic.storage.filesystem.base-dir" = local.vortex_base_dir
+    }
+    extraVolumes = [{
+      name                  = "vortex-context"
+      persistentVolumeClaim = { claimName = local.vortex_claim }
+    }]
+    extraVolumeMounts = [{
+      name      = "vortex-context"
+      mountPath = local.vortex_base_dir
+    }]
+
+    vortexAnalysis = {
+      storage = {
+        type       = "FILESYSTEM"
+        filesystem = { baseDir = local.vortex_base_dir }
+      }
+      extraVolumes = [{
+        name                  = "vortex-context"
+        persistentVolumeClaim = { claimName = local.vortex_claim }
+      }]
+      # Vortex only reads context; SonarQube Server writes it.
+      extraVolumeMounts = [{
+        name      = "vortex-context"
+        mountPath = local.vortex_base_dir
+        readOnly  = true
+      }]
+    }
+
+    agentOrchestrator = {
+      storage = {
+        type       = "FILESYSTEM"
+        filesystem = { baseDir = local.jobs_base_dir }
+      }
+      extraVolumes = [{
+        name                  = "agentic-jobs"
+        persistentVolumeClaim = { claimName = local.jobs_claim }
+      }]
+      extraVolumeMounts = [{
+        name      = "agentic-jobs"
+        mountPath = local.jobs_base_dir
+      }]
+    }
+
+    # Each runtime mounts ONLY its own subtree, so neither can see the other's files. Chart
+    # validation requires the mountPath to sit at or above storage.filesystem.baseDir.
+    hunterAgent      = local.runtime_storage_files["hunter"]
+    remediationAgent = local.runtime_storage_files["remediation"]
+  }
+
+  runtime_storage_files = {
+    for family in ["hunter", "remediation"] : family => {
+      storage = {
+        type       = "FILESYSTEM"
+        filesystem = { baseDir = "${local.jobs_base_dir}/${family}" }
+      }
+      extraVolumes = [{
+        name                  = "agentic-jobs"
+        persistentVolumeClaim = { claimName = local.jobs_claim }
+      }]
+      extraVolumeMounts = [{
+        name      = "agentic-jobs"
+        mountPath = "${local.jobs_base_dir}/${family}"
+        subPath   = family
+      }]
+    }
   }
 }
 
@@ -148,9 +219,6 @@ resource "helm_release" "sonarqube" {
   namespace  = local.ns
   timeout    = 1800
 
-  # A list of YAML documents, merged by Helm in order. Each optional block is gated on its own
-  # rather than merged into one map, because a Terraform conditional requires both branches to
-  # have the same type and these blocks do not.
   values = compact([
     file("${path.module}/sonarqube-values.yaml"),
 
@@ -164,29 +232,33 @@ resource "helm_release" "sonarqube" {
       }
     }),
 
-    # Pin the Server image explicitly. With `edition` set and no tag the chart composes one from
-    # Chart.AppVersion, so a chart whose appVersion lags its version deploys the older Server.
-    # Chart version and image version are a tested tuple; take both from the release notes.
+    # Pin the Server image explicitly only when overriding. As of chart 2026.5.1000 the appVersion
+    # is 2026.5.0, so `edition: enterprise` composes sonarqube:2026.5.0-enterprise on its own.
     var.sonarqube_image_tag == "" ? "" : yamlencode({
       image = { tag = var.sonarqube_image_tag }
     }),
 
-    # Only reference the settings-encryption secret once it exists. SonarQube generates the key
-    # itself, so the first apply leaves this off and a second apply turns it on.
+    # SonarQube generates its own settings-encryption key, so the first apply leaves this off and
+    # a second apply turns it on once the secret exists.
     var.enable_settings_encryption ? yamlencode({
       sonarSecretKey = "sonarqube-encryption-secret"
     }) : "",
 
     var.enable_agentic ? yamlencode(local.agentic) : "",
+    local.use_blob ? yamlencode(local.storage_blob) : "",
+    local.use_files ? yamlencode(local.storage_files) : "",
   ])
 
   depends_on = [
     azurerm_kubernetes_cluster_node_pool.sandbox, # empty when sandboxing is off
     azurerm_postgresql_flexible_server_firewall_rule.aks,
-    kubernetes_persistent_volume_claim_v1.jobs,
+    azurerm_storage_container.jobs, # empty unless storage_backend = azureblob
+    azurerm_storage_container.vortex,
+    kubernetes_persistent_volume_claim_v1.jobs, # empty unless storage_backend = azurefiles
     kubernetes_persistent_volume_claim_v1.vortex,
     kubernetes_secret_v1.db,
     kubernetes_secret_v1.monitoring,
     kubernetes_secret_v1.agentic_instance,
+    kubernetes_secret_v1.azure_storage,
   ]
 }

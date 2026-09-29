@@ -151,9 +151,11 @@ of shell history.
 | `runtime_replica_count` | `1` | Concurrent jobs per runtime |
 | `agentic_images` | all blank | Optional overrides. Blank repository takes the chart default; set only when mirroring |
 | `llm_allowed_domains` | `["api.anthropic.com"]` | Egress proxy allowlist |
-| `jobs_storage_size` | `100Gi` | Azure Files share for job artifacts |
-| `vortex_storage_size` | `100Gi` | Azure Files share for analyzer context |
-| `share_dir_mode` / `share_file_mode` | `0777` | Reference setting; see Design notes |
+| `storage_backend` | `azurefiles` | `azureblob` for presigned SAS locators, `azurefiles` for a mounted share |
+| `storage_account_name` | `""` | Required with `azureblob`. Globally unique, 3–24 lowercase alphanumerics |
+| `jobs_storage_size` | `100Gi` | Azure Files share for job artifacts (`azurefiles` only) |
+| `vortex_storage_size` | `100Gi` | Azure Files share for analyzer context (`azurefiles` only) |
+| `share_dir_mode` / `share_file_mode` | `0777` | `azurefiles` only. Reference setting; see Design notes |
 | `share_gid` | `0` | Set with `0770` modes for least privilege |
 | `enable_settings_encryption` | `false` | Turn on for the second apply |
 | `tags` | `{}` | Applied to every Azure resource |
@@ -214,43 +216,39 @@ traditional containers achieve on Azure Files. **This module's filesystem storag
 exercised with sandboxing enabled** — see Known limitations. An object-storage backend avoids the
 question entirely, because the runtime reaches storage over the network instead of through a mount.
 
-**Storage: Azure Files here; Azure Blob is fully supported and arguably the better fit.** Sonar's
-`sonar-object-store` library supports five backends — `S3`, `AZURE`, `GCS`, `FILESYSTEM` and
-`NFS`. Azure Blob is not a second-class option reached through S3 emulation: `AzureObjectStore`
-mints **native SAS presigned URLs**, and the library's own backend-selection guide lists it as
-"presigned URLs (SAS), nothing extra" to deploy.
+**Two storage backends, selected by `storage_backend`.** Sonar's `sonar-object-store` library
+supports `S3`, `AZURE`, `GCS`, `FILESYSTEM` and `NFS`. This module implements the two that make
+sense on AKS, and the choice is an isolation decision as much as a storage one:
 
-The distinction that matters for agentic workloads is how the untrusted runtime reaches storage:
-
-| | Object store (S3, Azure Blob, GCS) | Filesystem / NFS (Azure Files here) |
+| | `azureblob` | `azurefiles` (default) |
 | --- | --- | --- |
-| What the runtime is handed | A presigned `https` URL, scoped to one object and one verb, expiring after `presign-ttl-seconds` (default 6 h) | A direct `file://` path on a volume it mounts |
-| Isolation enforced by | The locator itself — a leaked URL is useless after expiry and cannot be repurposed | **Your deployment** — per-job directories, mount scoping, permissions |
-| Deployment requirement | None beyond the endpoint | Orchestrator and runtime must mount the same volume at the same path |
-| Interaction with Pod Sandboxing | None — the runtime mounts nothing | Volume reaches the pod VM through `virtiofsd`; untested here |
+| Library provider | `AzureObjectStore` — native SAS presigned URLs | `FilesystemObjectStore` |
+| What the runtime is handed | A presigned `https` URL scoped to **one object and one verb**, expiring after the presign TTL (default 6 h) | A direct `file://` path on a volume it mounts |
+| Isolation enforced by | The locator itself — a leaked URL is useless after expiry and cannot be repurposed | **Your deployment** — mount scoping and permissions |
+| Azure resources | Storage account + two containers | Two ReadWriteMany file shares + a custom StorageClass |
+| Authentication | Connection string in a Kubernetes secret. No Managed Identity path | None — reached by mount |
+| Egress allowlist | Must include `<account>.blob.core.windows.net` | Nothing — storage is not a network call |
+| Pod Sandboxing interaction | None; the runtime mounts nothing | Volume reaches the pod VM through `virtiofsd`; **untested here** |
+| Maturity | Sonar documents Azure as "wired but least-exercised" | Validated end to end in this module |
 
-The library documentation is explicit that with a filesystem backend "isolation between jobs and
-tenants is a deployment concern rather than something the library enforces with signed URLs. Scope
-the mount appropriately for untrusted runtimes." That is worth weighing against the `0777` share
-modes this module uses by default (see below) — those are a lab setting, and on a filesystem
-backend the mount permissions *are* the isolation boundary.
+`azurefiles` is the default because it is the path with evidence behind it here. `azureblob` is the
+stronger isolation model for an untrusted runtime and sidesteps the sandboxing question — the
+library's own documentation notes that with a filesystem backend "isolation between jobs and
+tenants is a deployment concern rather than something the library enforces with signed URLs."
+Expect to move to `azureblob` once it has been exercised against a released chart.
 
-Configuring Blob needs two properties under the component's storage prefix — `azure.container` and
-`azure.connection-string` — plus `type: AZURE`. Authentication is **connection-string only**; there
-is no Managed Identity or Workload Identity path, so a storage account key lives in a Kubernetes
-secret. The chart exposes no dedicated Azure fields today, and its `agentOrchestrator.storage.type`
-comment lists only `S3`, `FILESYSTEM` and `NFS` — but that is a documentation gap in the chart, not
-a capability gap: the Orchestrator reads the same library under the
-`sonar.agentic.orchestrator.storage.` prefix, so the settings go through the chart's generic `env`
-passthrough.
+Blob needs `type: AZURE` plus `azure.container` and `azure.connection-string` under each
+component's storage prefix. The chart exposes no dedicated Azure fields and its
+`agentOrchestrator.storage.type` comment omits `AZURE`, but that is a documentation gap rather
+than a capability gap — the Orchestrator reads the same library under
+`sonar.agentic.orchestrator.storage.`, so this module supplies those two settings through the
+chart's generic `env` passthrough. The runtimes receive no storage configuration at all on either
+backend; they act on locators.
 
-Two honest caveats before choosing Blob. The library's own limitations section says **"Azure and
-GCS are wired but least-exercised; S3/MinIO is the primary, fully validated path."** And this
-module does not implement Blob — it implements Azure Files, which is what was validated end to end
-here. MinIO is separately ruled out because its images are no longer anonymously pullable
+MinIO is separately ruled out: its images are no longer anonymously pullable
 (`quay.io/minio/minio` returns 401 repo-wide).
 
-**The custom StorageClass is load-bearing, and its modes are a reference setting.** AKS's built-in
+**On `azurefiles`, the custom StorageClass is load-bearing and its modes are a reference setting.** AKS's built-in
 `azurefile-csi` sets no `uid`, `gid` or `file_mode`, so an SMB mount lands root-owned and the
 agentic containers — uid 900, 1000 and 10001 — cannot write to it. Without permissive modes the
 shares still bind and the pods still start; jobs fail later, on write. The `0777` defaults are what was validated and are appropriate for a lab **only**. On a filesystem
@@ -302,6 +300,11 @@ passwords, and the Helm release.
   mechanism — not that the agentic containers can read and write those shares.
 - **Azure Files is SMB.** Throughput and IOPS differ from managed disks, and Standard tier is the
   default here. Raise to `Premium_LRS` in the StorageClass if job staging is slow.
+- **The `azureblob` backend is implemented but not yet exercised.** It follows the object-store
+  library's documented configuration, but neither this module nor Sonar's own testing has made it
+  the primary path — the library calls Azure "least-exercised" against S3/MinIO. Validate it
+  before relying on it, and note that it also removes the untested Kata-plus-`virtiofs`
+  interaction, so proving it out closes two gaps at once.
 
 ### Validated on 2026-09-27
 

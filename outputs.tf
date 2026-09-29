@@ -30,3 +30,13 @@ output "get_credentials_command" {
 output "port_forward_command" {
   value = "kubectl port-forward -n ${local.ns} svc/sonarqube-sonarqube 9000:9000"
 }
+
+output "storage_backend" {
+  description = "Which storage backend the agentic components are configured against."
+  value       = var.enable_agentic ? var.storage_backend : "n/a (agentic disabled)"
+}
+
+output "blob_endpoint" {
+  description = "Storage host the runtimes reach through the egress proxy. Empty on the filesystem backend."
+  value       = local.blob_host
+}
