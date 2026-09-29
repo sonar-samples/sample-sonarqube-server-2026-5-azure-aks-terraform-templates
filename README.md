@@ -214,33 +214,50 @@ traditional containers achieve on Azure Files. **This module's filesystem storag
 exercised with sandboxing enabled** — see Known limitations. An object-storage backend avoids the
 question entirely, because the runtime reaches storage over the network instead of through a mount.
 
-**Storage: Azure Files here, but Azure Blob is supported.** Sonar's object-store library supports
-S3, **Azure Blob**, Google Cloud Storage, and filesystem/NFS, and the chart's `vortexAnalysis`
-storage type documents `AZURE` alongside `S3`, `FILESYSTEM`, `GCS` and `NFS`. Azure Blob exposes no
-S3-compatible API, but it does not need one — it is a first-class backend in its own right, reached
-through the `AZURE` storage type rather than through S3 emulation.
+**Storage: Azure Files here; Azure Blob is fully supported and arguably the better fit.** Sonar's
+`sonar-object-store` library supports five backends — `S3`, `AZURE`, `GCS`, `FILESYSTEM` and
+`NFS`. Azure Blob is not a second-class option reached through S3 emulation: `AzureObjectStore`
+mints **native SAS presigned URLs**, and the library's own backend-selection guide lists it as
+"presigned URLs (SAS), nothing extra" to deploy.
 
-What the chart exposes today is narrower than what the library supports. The `agentOrchestrator`
-storage block documents only `S3`, `FILESYSTEM` and `NFS`, and renders S3-shaped environment
-variables with no dedicated Azure container or connection-string field, so configuring Blob for the
-Orchestrator currently means setting `storage.type` and injecting the Azure settings through the
-chart's generic `env` passthrough. Check the released chart's storage matrix — this is the kind of
-gap a release closes.
+The distinction that matters for agentic workloads is how the untrusted runtime reaches storage:
 
-This module implements Azure Files over `ReadWriteMany` because it is what was validated end to
-end, it needs no storage credentials, and it serves both the job store and the Vortex context
-store with one mechanism. It is one supported option, not the only one and not a recommendation
-over object storage — the chart describes S3-compatible object storage as its recommended
-production backend for job storage. MinIO is specifically ruled out here for an unrelated reason:
-its container images are no longer anonymously pullable (`quay.io/minio/minio` returns 401
-repo-wide), so an in-cluster MinIO would need registry credentials before the install could finish.
+| | Object store (S3, Azure Blob, GCS) | Filesystem / NFS (Azure Files here) |
+| --- | --- | --- |
+| What the runtime is handed | A presigned `https` URL, scoped to one object and one verb, expiring after `presign-ttl-seconds` (default 6 h) | A direct `file://` path on a volume it mounts |
+| Isolation enforced by | The locator itself — a leaked URL is useless after expiry and cannot be repurposed | **Your deployment** — per-job directories, mount scoping, permissions |
+| Deployment requirement | None beyond the endpoint | Orchestrator and runtime must mount the same volume at the same path |
+| Interaction with Pod Sandboxing | None — the runtime mounts nothing | Volume reaches the pod VM through `virtiofsd`; untested here |
+
+The library documentation is explicit that with a filesystem backend "isolation between jobs and
+tenants is a deployment concern rather than something the library enforces with signed URLs. Scope
+the mount appropriately for untrusted runtimes." That is worth weighing against the `0777` share
+modes this module uses by default (see below) — those are a lab setting, and on a filesystem
+backend the mount permissions *are* the isolation boundary.
+
+Configuring Blob needs two properties under the component's storage prefix — `azure.container` and
+`azure.connection-string` — plus `type: AZURE`. Authentication is **connection-string only**; there
+is no Managed Identity or Workload Identity path, so a storage account key lives in a Kubernetes
+secret. The chart exposes no dedicated Azure fields today, and its `agentOrchestrator.storage.type`
+comment lists only `S3`, `FILESYSTEM` and `NFS` — but that is a documentation gap in the chart, not
+a capability gap: the Orchestrator reads the same library under the
+`sonar.agentic.orchestrator.storage.` prefix, so the settings go through the chart's generic `env`
+passthrough.
+
+Two honest caveats before choosing Blob. The library's own limitations section says **"Azure and
+GCS are wired but least-exercised; S3/MinIO is the primary, fully validated path."** And this
+module does not implement Blob — it implements Azure Files, which is what was validated end to end
+here. MinIO is separately ruled out because its images are no longer anonymously pullable
+(`quay.io/minio/minio` returns 401 repo-wide).
 
 **The custom StorageClass is load-bearing, and its modes are a reference setting.** AKS's built-in
 `azurefile-csi` sets no `uid`, `gid` or `file_mode`, so an SMB mount lands root-owned and the
 agentic containers — uid 900, 1000 and 10001 — cannot write to it. Without permissive modes the
-shares still bind and the pods still start; jobs fail later, on write. The `0777` defaults are what
-was validated and are appropriate for a lab. Otherwise set `share_gid` to a gid the pods carry,
-drop the modes to `0770`, add a matching pod `fsGroup`, and retest the write.
+shares still bind and the pods still start; jobs fail later, on write. The `0777` defaults are what was validated and are appropriate for a lab **only**. On a filesystem
+backend the mount permissions are the isolation boundary between untrusted runtimes — the library
+does not enforce it with signed URLs — so for anything beyond evaluation set `share_gid` to a gid
+the pods carry, drop the modes to `0770`, add a matching pod `fsGroup`, and retest the write. The
+per-runtime `subPath` mounts limit what each runtime sees, but permissive modes weaken that.
 
 **Subdirectory isolation.** The Orchestrator mounts the jobs share at its root and writes each
 runtime's jobs into a subdirectory named after that runtime. Each runtime mounts only its own
