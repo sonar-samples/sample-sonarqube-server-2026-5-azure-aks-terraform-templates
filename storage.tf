@@ -43,6 +43,15 @@ resource "azurerm_storage_account" "agentic" {
   account_replication_type = "LRS"
   min_tls_version          = "TLS1_2"
   tags                     = var.tags
+
+  # Caught at plan time. Without this the empty name reaches the Azure API and fails
+  # late with an opaque naming error, after the cluster has already been built.
+  lifecycle {
+    precondition {
+      condition     = var.storage_account_name != ""
+      error_message = "storage_account_name is required when storage_backend is azureblob. Use 3-24 lowercase alphanumerics, globally unique across Azure."
+    }
+  }
 }
 
 resource "azurerm_storage_container" "jobs" {

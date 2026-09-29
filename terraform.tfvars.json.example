@@ -32,9 +32,9 @@
   "llm_allowed_domains": ["api.anthropic.com"],
 
   "_comment_storage": "azureblob = presigned SAS locators, nothing mounted. azurefiles = file:// paths on a ReadWriteMany share.",
-  "storage_backend": "azurefiles",
+  "storage_backend": "azureblob",
 
-  "storage_account_name": "",
+  "storage_account_name": "acmesqagentic01",
 
   "jobs_storage_size": "100Gi",
   "vortex_storage_size": "100Gi",

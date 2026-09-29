@@ -115,12 +115,18 @@ variable "runtime_replica_count" {
 #                handed a file:// path and mounts the share, so isolation rests on mount scoping
 #                and permissions rather than on signed URLs.
 #
-# Defaults to azurefiles because that is the path validated end to end here. Sonar's own
-# object-store documentation notes that Azure and GCS are "wired but least-exercised", with
-# S3/MinIO the primary validated path.
+# Defaults to azureblob: it is the backend Sonar supports for Azure, and the path this
+# module was validated against end to end (all components healthy, repeat plan clean).
+# It is also the simpler shape - the runtimes receive presigned SAS locators and mount no
+# storage at all, so there is no share, no StorageClass and no mount-permission tuning.
+#
+# azurefiles remains supported and is the fallback where policy forbids blob endpoints. It
+# hands the runtimes file:// paths, which makes mount permissions the isolation boundary,
+# and its interaction with Kata sandboxing (virtiofs) is not covered by this module's
+# testing. Setting it requires storage_account_name.
 variable "storage_backend" {
   type    = string
-  default = "azurefiles"
+  default = "azureblob"
 
   validation {
     condition     = contains(["azurefiles", "azureblob"], var.storage_backend)

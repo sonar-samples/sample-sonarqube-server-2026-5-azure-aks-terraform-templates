@@ -151,7 +151,7 @@ of shell history.
 | `runtime_replica_count` | `1` | Concurrent jobs per runtime |
 | `agentic_images` | all blank | Optional overrides. Blank repository takes the chart default; set only when mirroring |
 | `llm_allowed_domains` | `["api.anthropic.com"]` | Egress proxy allowlist |
-| `storage_backend` | `azurefiles` | `azureblob` for presigned SAS locators, `azurefiles` for a mounted share |
+| `storage_backend` | `azureblob` | `azureblob` for presigned SAS locators, `azurefiles` for a mounted share |
 | `storage_account_name` | `""` | Required with `azureblob`. Globally unique, 3–24 lowercase alphanumerics |
 | `jobs_storage_size` | `100Gi` | Azure Files share for job artifacts (`azurefiles` only) |
 | `vortex_storage_size` | `100Gi` | Azure Files share for analyzer context (`azurefiles` only) |
@@ -220,7 +220,7 @@ question entirely, because the runtime reaches storage over the network instead 
 supports `S3`, `AZURE`, `GCS`, `FILESYSTEM` and `NFS`. This module implements the two that make
 sense on AKS, and the choice is an isolation decision as much as a storage one:
 
-| | `azureblob` | `azurefiles` (default) |
+| | `azureblob` (default) | `azurefiles` |
 | --- | --- | --- |
 | Library provider | `AzureObjectStore` — native SAS presigned URLs | `FilesystemObjectStore` |
 | What the runtime is handed | A presigned `https` URL scoped to **one object and one verb**, expiring after the presign TTL (default 6 h) | A direct `file://` path on a volume it mounts |
@@ -228,14 +228,17 @@ sense on AKS, and the choice is an isolation decision as much as a storage one:
 | Azure resources | Storage account + two containers | Two ReadWriteMany file shares + a custom StorageClass |
 | Authentication | Connection string in a Kubernetes secret. No Managed Identity path | None — reached by mount |
 | Egress allowlist | Must include `<account>.blob.core.windows.net` | Nothing — storage is not a network call |
-| Pod Sandboxing interaction | None; the runtime mounts nothing | Volume reaches the pod VM through `virtiofsd`; **untested here** |
-| Maturity | Sonar documents Azure as "wired but least-exercised" | Validated end to end in this module |
+| Pod Sandboxing interaction | None; the runtime mounts nothing. Verified: the runtime pods carry only `agentic-keys` | Volume reaches the pod VM through `virtiofsd`; **untested here** |
+| Maturity | Validated end to end by this module against the 2026.5.1000 chart | Validated end to end, but not with Pod Sandboxing |
 
-`azurefiles` is the default because it is the path with evidence behind it here. `azureblob` is the
-stronger isolation model for an untrusted runtime and sidesteps the sandboxing question — the
+`azureblob` is the default. It is the backend Sonar supports for Azure, it is the stronger
+isolation model for an untrusted runtime, and it sidesteps the sandboxing question entirely — the
 library's own documentation notes that with a filesystem backend "isolation between jobs and
 tenants is a deployment concern rather than something the library enforces with signed URLs."
-Expect to move to `azureblob` once it has been exercised against a released chart.
+It has now been exercised end to end against the 2026.5.1000 chart with Pod Sandboxing enabled.
+
+`azurefiles` remains supported as the fallback where policy forbids blob endpoints. Its
+interaction with Kata sandboxing is still uncovered by this module's testing.
 
 Blob needs `type: AZURE` plus `azure.container` and `azure.connection-string` under each
 component's storage prefix. The chart exposes no dedicated Azure fields and its
@@ -300,11 +303,13 @@ passwords, and the Helm release.
   mechanism — not that the agentic containers can read and write those shares.
 - **Azure Files is SMB.** Throughput and IOPS differ from managed disks, and Standard tier is the
   default here. Raise to `Premium_LRS` in the StorageClass if job staging is slow.
-- **The `azureblob` backend is implemented but not yet exercised.** It follows the object-store
-  library's documented configuration, but neither this module nor Sonar's own testing has made it
-  the primary path — the library calls Azure "least-exercised" against S3/MinIO. Validate it
-  before relying on it, and note that it also removes the untested Kata-plus-`virtiofs`
-  interaction, so proving it out closes two gaps at once.
+- **SonarQube Server cannot receive the blob connection string through an environment
+  variable.** The object-store library reads `azure.connection-string`, hyphenated. The
+  Orchestrator and Vortex are Spring Boot and bind it from `SONAR_..._CONNECTION_STRING` through
+  relaxed binding; the Server maps `SONAR_X_Y` to `sonar.x.y` and can never emit the hyphen, so
+  the value silently never binds and the Server aborts at startup with "Invalid connection
+  string". This module routes the Server through the chart's `sonarSecretProperties` instead,
+  which merges a secret into `sonar.properties`. Keep that wiring if you fork the storage code.
 
 ### Validated on 2026-09-27
 
@@ -323,6 +328,30 @@ A full apply and destroy in `northeurope` against chart 2026.4.1:
 The destroy path completed cleanly despite the providers reading credentials from the cluster being
 deleted. That remains a theoretical weak point on a refresh after the cluster is removed out of
 band; if you hit it, destroy `helm_release.sonarqube` first.
+
+### Validated on 2026-09-29 — agentic stack on `azureblob`
+
+A full apply in `northeurope` with `enable_agentic = true`, `enable_pod_sandboxing = true` and
+`storage_backend = "azureblob"`, against chart `2026.5.1000` built from source (the package was
+not yet published):
+
+| | |
+| --- | --- |
+| All seven pods | `1/1 Running`, zero restarts |
+| SonarQube Server | resolved `sonar.agentic.storage.azure.connection-string`; no "Invalid connection string" |
+| Blob containers | `agent-jobs` and `vortex-context` created |
+| Agent runtimes | scheduled to the sandbox pool under RuntimeClass `kata-vm-isolation` |
+| Kata isolation | genuine — guest kernel `6.6.137.mshv1-1.azl3` vs host `6.6.137.mshv2-2.azl3` |
+| Runtime storage | none; the only volume on a runtime pod is `agentic-keys` |
+| Repeat `terraform plan` | `No changes` |
+
+Two defects surfaced only at runtime, neither reachable by `terraform validate` or
+`helm template`: the Server's connection-string binding (above), and the sandbox pool pinning
+`node_count = 0` against its own autoscaler, which scaled the pool back to zero on the *second*
+apply and evicted both runtimes. Both are fixed here.
+
+Not covered: a Hunter or Remediation job executed end to end, which needs a licence, an LLM
+provider and a bound project.
 
 ## Upgrade
 
