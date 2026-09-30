@@ -175,6 +175,11 @@ shell history.
   this module routes it through `sonarSecretProperties`. Keep that wiring if you fork it.
 - **Runtime replicas are fixed**, so the agentic pool stays provisioned. Add agentic nodes
   alongside `runtime_replica_count`.
+- **Change `location` by destroying first, not by re-applying.** A plan for a new region replaces
+  the VNet but updates its subnets in place, because they keep the same names. Deleting the VNet
+  deletes the subnets, so that apply fails. Run `terraform destroy`, then apply with the new
+  region. If AKS returns `AKSCapacityHeavyUsage`, the region is refusing new clusters; pick
+  another one.
 - **Reusing a storage account name straight after a destroy leaves stale DNS.** Pick a fresh
   `storage_account_name` per run or confirm from inside the cluster.
 
