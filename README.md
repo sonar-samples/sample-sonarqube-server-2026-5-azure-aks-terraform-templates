@@ -45,6 +45,8 @@ Application Gateway, without the agentic capabilities.
   to Azure by connection string only; an Azure Policy that disables shared key access breaks it.
 - A region permitted by any allowed-locations Azure Policy, with availability zones (for
   PostgreSQL HA) and vCPU headroom for all three pools, plus any tags your policy mandates.
+  AKS creates its own node resource group (`MC_…`) in the cluster's region, so a policy that
+  restricts *resource group* locations applies too, even when `create_resource_group = false`.
 - **`az login` may not be sufficient.** The azurerm provider needs a Microsoft Graph-scoped token,
   and a Conditional Access policy can refuse it while ordinary `az` commands keep working.
   Confirm with `az account get-access-token --scope https://graph.microsoft.com/.default`.
