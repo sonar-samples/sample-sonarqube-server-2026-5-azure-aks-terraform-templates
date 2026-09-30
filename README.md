@@ -1,6 +1,6 @@
-# SonarQube Server 2026.5 Enterprise with agentic components — Azure AKS
+# SonarQube Server 2026.5 Enterprise Edition with agentic components — Azure AKS
 
-Terraform for SonarQube Server 2026.5 Enterprise on Azure Kubernetes Service, optionally with the
+Terraform templates for SonarQube Server 2026.5 Enterprise Edition on Azure Kubernetes Service (AKS), optionally with the
 2026.5 agentic components: Sonar Vortex analysis, the Agent Orchestrator, the SonarQube Hunter
 Agent, and the SonarQube Remediation Agent.
 
