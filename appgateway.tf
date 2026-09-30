@@ -1,8 +1,9 @@
 # --------------------------------------------------------------------------
 # Application Gateway
 #
-# Terminates HTTPS on 443 with the ACME certificate and forwards plain HTTP to the SonarQube
-# internal load balancer on 9000. Port 80 redirects to HTTPS. SonarQube Server is the only
+# Terminates HTTPS on 443 with the ACME certificate and forwards plain HTTP to SonarQube Server on
+# 9000, through the internal load balancer or, in gateway-restricted mode, the restricted public
+# load balancer IP. Port 80 redirects to HTTPS. SonarQube Server is the only
 # workload with an external route: the agentic API is served in-process by the Server, and the
 # Orchestrator, Vortex and both runtimes stay ClusterIP.
 # --------------------------------------------------------------------------
@@ -63,7 +64,7 @@ resource "azurerm_application_gateway" "this" {
 
   backend_address_pool {
     name         = local.appgw_backend
-    ip_addresses = [local.sonarqube_internal_ip]
+    ip_addresses = [local.sonarqube_backend_ip]
   }
 
   # 300s rather than the 60s default: large analysis report and analyzer-context uploads can
@@ -80,7 +81,7 @@ resource "azurerm_application_gateway" "this" {
   probe {
     name                = local.appgw_probe
     protocol            = "Http"
-    host                = local.sonarqube_internal_ip
+    host                = local.sonarqube_backend_ip
     path                = "/api/system/status"
     interval            = 30
     timeout             = 30

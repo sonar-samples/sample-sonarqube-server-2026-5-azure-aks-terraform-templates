@@ -232,10 +232,10 @@ resource "helm_release" "sonarqube" {
   values = compact([
     file("${path.module}/sonarqube-values.yaml"),
 
-    # The Server is exposed on an internal load balancer at a fixed private address, which is the
-    # Application Gateway's only backend. serverBaseURL makes links the Server emits (Remediation
-    # Agent pull requests, notifications, webhooks) carry the public HTTPS hostname.
-    yamlencode({
+    # The Server's load balancer is the Application Gateway's only backend: internal at a fixed
+    # private address, or (gateway-restricted) a public IP that admits only the gateway. Each
+    # branch is encoded separately because the two service shapes differ in type.
+    local.internal_exposure ? yamlencode({
       service = {
         type = "LoadBalancer"
         annotations = {
@@ -244,6 +244,20 @@ resource "helm_release" "sonarqube" {
           "service.beta.kubernetes.io/azure-load-balancer-ipv4"            = local.sonarqube_internal_ip
         }
       }
+      }) : yamlencode({
+      service = {
+        type                     = "LoadBalancer"
+        loadBalancerSourceRanges = ["${azurerm_public_ip.appgw.ip_address}/32"]
+        annotations = {
+          "service.beta.kubernetes.io/azure-pip-name"                     = one(azurerm_public_ip.sonarqube_svc[*].name)
+          "service.beta.kubernetes.io/azure-load-balancer-resource-group" = azurerm_kubernetes_cluster.this.node_resource_group
+        }
+      }
+    }),
+
+    # serverBaseURL makes links the Server emits (Remediation Agent pull requests, notifications,
+    # webhooks) carry the public HTTPS hostname.
+    yamlencode({
       sonarProperties = {
         "sonar.core.serverBaseURL" = local.sonarqube_url
       }
@@ -277,7 +291,8 @@ resource "helm_release" "sonarqube" {
   ])
 
   depends_on = [
-    azurerm_role_assignment.aks_network, # internal load balancer in the private subnet
+    azurerm_role_assignment.aks_network, # internal exposure only
+    azurerm_public_ip.sonarqube_svc,     # gateway-restricted exposure only
     azurerm_kubernetes_cluster_node_pool.sonarqube,
     azurerm_kubernetes_cluster_node_pool.agentic, # empty unless enable_agentic = true
     azurerm_postgresql_flexible_server_database.sonarqube,

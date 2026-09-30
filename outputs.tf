@@ -7,9 +7,9 @@ output "appgw_public_ip" {
   value = azurerm_public_ip.appgw.ip_address
 }
 
-output "sonarqube_internal_ip" {
-  description = "Internal load balancer address. The Application Gateway's only backend."
-  value       = local.sonarqube_internal_ip
+output "sonarqube_backend_ip" {
+  description = "The Application Gateway's only backend: the internal load balancer address, or the restricted public IP in gateway-restricted mode."
+  value       = local.sonarqube_backend_ip
 }
 
 output "certificate_not_after" {

@@ -53,18 +53,39 @@ resource "azurerm_subnet" "private" {
 }
 
 locals {
+  internal_exposure = var.sonarqube_exposure == "internal"
+
   # Static address for the SonarQube internal load balancer. Taken from the top of the subnet
   # because dynamic allocations (the private endpoint) fill from the bottom.
   sonarqube_internal_ip = cidrhost(var.private_subnet_cidr, -6)
+
+  # The gateway's only backend, whichever exposure mode is selected.
+  sonarqube_backend_ip = local.internal_exposure ? local.sonarqube_internal_ip : one(azurerm_public_ip.sonarqube_svc[*].ip_address)
 }
 
-# The cluster identity creates the internal load balancer in the `private` subnet and joins
-# nodes to `aks`. On a bring-your-own VNet it needs Network Contributor there; without it the
+# internal exposure only. The cluster identity creates the internal load balancer in the
+# `private` subnet. On a bring-your-own VNet it needs Network Contributor there; without it the
 # Service stays <pending> and the gateway backend never answers.
 resource "azurerm_role_assignment" "aks_network" {
+  count = local.internal_exposure ? 1 : 0
+
   scope                = azurerm_virtual_network.this.id
   role_definition_name = "Network Contributor"
   principal_id         = azurerm_kubernetes_cluster.this.identity[0].principal_id
+}
+
+# gateway-restricted exposure only. Created in the AKS node resource group, where the cluster
+# identity already holds Contributor, so AKS can attach it to its load balancer without any
+# role assignment.
+resource "azurerm_public_ip" "sonarqube_svc" {
+  count = local.internal_exposure ? 0 : 1
+
+  name                = "${var.cluster_name}-sonarqube-svc-pip"
+  location            = var.location
+  resource_group_name = azurerm_kubernetes_cluster.this.node_resource_group
+  allocation_method   = "Static"
+  sku                 = "Standard"
+  tags                = var.tags
 }
 
 # --------------------------------------------------------------------------

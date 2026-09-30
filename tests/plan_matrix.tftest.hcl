@@ -47,6 +47,17 @@ variables {
   dns_resource_group_name = "dns"
   acme_email              = "ops@example.com"
   storage_account_name    = "acmesqagentic01"
+
+  # Pinned so a terraform.tfvars.json in the working directory, which `terraform test` loads
+  # automatically, cannot change what the matrix exercises.
+  create_resource_group      = true
+  resource_group_name        = "sonarqube-2026-5"
+  host_name                  = "sonarqube"
+  enable_agentic             = false
+  storage_backend            = "azureblob"
+  sonarqube_exposure         = "internal"
+  postgres_high_availability = true
+  enable_settings_encryption = false
 }
 
 run "default_server_only" {
@@ -140,5 +151,27 @@ run "existing_resource_group" {
   assert {
     condition     = length(azurerm_resource_group.this) == 0 && azurerm_kubernetes_cluster.this.resource_group_name == "platform-provided-rg"
     error_message = "create_resource_group = false must reuse the named resource group and create none."
+  }
+}
+
+run "gateway_restricted_exposure" {
+  command = plan
+  variables {
+    sonarqube_exposure = "gateway-restricted"
+    enable_agentic     = true
+  }
+
+  assert {
+    condition     = length(azurerm_role_assignment.aks_network) == 0 && length(azurerm_public_ip.sonarqube_svc) == 1
+    error_message = "gateway-restricted must create the restricted public IP and no role assignment."
+  }
+}
+
+run "internal_exposure_default" {
+  command = plan
+
+  assert {
+    condition     = length(azurerm_role_assignment.aks_network) == 1 && length(azurerm_public_ip.sonarqube_svc) == 0
+    error_message = "internal exposure must create the role assignment and no public IP for the Server."
   }
 }

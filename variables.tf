@@ -97,6 +97,27 @@ variable "service_cidr" {
   default     = "10.2.0.0/16"
 }
 
+# How Application Gateway reaches SonarQube Server.
+#
+#   internal           - internal load balancer at a fixed address in the private subnet. Nothing
+#                        but the gateway has a public address. The module grants the cluster
+#                        identity Network Contributor on the VNet, so the identity running
+#                        Terraform must be able to create role assignments.
+#
+#   gateway-restricted - public load balancer IP in the AKS node resource group, accepting
+#                        connections only from the gateway's public IP (AKS writes the NSG rule).
+#                        Needs no role assignment, so it works with Contributor alone. Traffic
+#                        from the gateway to the Server is HTTP over that public address.
+variable "sonarqube_exposure" {
+  type    = string
+  default = "internal"
+
+  validation {
+    condition     = contains(["internal", "gateway-restricted"], var.sonarqube_exposure)
+    error_message = "sonarqube_exposure must be internal or gateway-restricted."
+  }
+}
+
 variable "appgw_capacity" {
   description = "Application Gateway instance count."
   type        = number
