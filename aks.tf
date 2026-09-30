@@ -1,7 +1,21 @@
+# Created by default. Set create_resource_group = false to deploy into a resource group that
+# already exists, for example one a platform team provisions and grants you access to.
 resource "azurerm_resource_group" "this" {
+  count = var.create_resource_group ? 1 : 0
+
   name     = var.resource_group_name
   location = var.location
   tags     = var.tags
+}
+
+data "azurerm_resource_group" "existing" {
+  count = var.create_resource_group ? 0 : 1
+
+  name = var.resource_group_name
+}
+
+locals {
+  resource_group_name = one(concat(azurerm_resource_group.this[*].name, data.azurerm_resource_group.existing[*].name))
 }
 
 data "azurerm_kubernetes_service_versions" "current" {
@@ -24,7 +38,7 @@ locals {
 resource "azurerm_kubernetes_cluster" "this" {
   name                = var.cluster_name
   location            = var.location
-  resource_group_name = azurerm_resource_group.this.name
+  resource_group_name = local.resource_group_name
   dns_prefix          = var.cluster_name
   kubernetes_version  = local.kubernetes_version
   tags                = var.tags

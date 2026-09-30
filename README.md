@@ -102,6 +102,7 @@ shell history.
 | `storage_account_name` | `""` | Required with the agentic components. Globally unique, 3–24 lowercase alphanumerics |
 | `location` | `westeurope` | Must satisfy allowed-locations policy, zones and vCPU quota |
 | `resource_group_name` | `sonarqube-2026-5` | |
+| `create_resource_group` | `true` | `false` deploys into an existing resource group named `resource_group_name` |
 | `cluster_name` | `sonarqube-aks` | |
 | `postgres_name` | `sonarqube-pg` | Globally unique across Azure; `plan` will not catch a collision |
 | `postgres_sku` | `GP_Standard_D4ds_v5` | |

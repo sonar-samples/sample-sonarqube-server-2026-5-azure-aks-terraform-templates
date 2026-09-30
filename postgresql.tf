@@ -10,7 +10,7 @@ resource "random_password" "postgres" {
 
 resource "azurerm_private_dns_zone" "postgresql" {
   name                = "${var.postgres_name}.private.postgres.database.azure.com"
-  resource_group_name = azurerm_resource_group.this.name
+  resource_group_name = local.resource_group_name
   tags                = var.tags
 }
 
@@ -29,7 +29,7 @@ resource "azurerm_private_dns_zone_virtual_network_link" "postgresql" {
 
 resource "azurerm_postgresql_flexible_server" "this" {
   name                          = var.postgres_name
-  resource_group_name           = azurerm_resource_group.this.name
+  resource_group_name           = local.resource_group_name
   location                      = var.location
   version                       = "16"
   sku_name                      = var.postgres_sku

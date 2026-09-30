@@ -18,7 +18,7 @@ locals {
 resource "azurerm_application_gateway" "this" {
   name                = "${var.cluster_name}-appgw"
   location            = var.location
-  resource_group_name = azurerm_resource_group.this.name
+  resource_group_name = local.resource_group_name
   tags                = var.tags
 
   # Standard_v2 does not enforce a request-body limit, so analyzer-context uploads pass. If

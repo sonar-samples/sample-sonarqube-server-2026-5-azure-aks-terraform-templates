@@ -14,6 +14,12 @@ variable "resource_group_name" {
   default = "sonarqube-2026-5"
 }
 
+variable "create_resource_group" {
+  description = "false deploys into an existing resource group named resource_group_name. Its region must match location."
+  type        = bool
+  default     = true
+}
+
 variable "cluster_name" {
   type    = string
   default = "sonarqube-aks"

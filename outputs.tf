@@ -18,7 +18,7 @@ output "certificate_not_after" {
 }
 
 output "resource_group_name" {
-  value = azurerm_resource_group.this.name
+  value = local.resource_group_name
 }
 
 output "cluster_name" {
@@ -39,7 +39,7 @@ output "sonarqube_status" {
 }
 
 output "get_credentials_command" {
-  value = "az aks get-credentials -g ${azurerm_resource_group.this.name} -n ${azurerm_kubernetes_cluster.this.name}"
+  value = "az aks get-credentials -g ${local.resource_group_name} -n ${azurerm_kubernetes_cluster.this.name}"
 }
 
 output "port_forward_command" {

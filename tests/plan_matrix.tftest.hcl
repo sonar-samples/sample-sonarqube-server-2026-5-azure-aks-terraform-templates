@@ -23,6 +23,11 @@ mock_provider "azurerm" {
       id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/acmesqagentic01"
     }
   }
+  mock_data "azurerm_resource_group" {
+    defaults = {
+      name = "platform-provided-rg"
+    }
+  }
   mock_data "azurerm_kubernetes_service_versions" {
     defaults = {
       latest_version = "1.35.0"
@@ -121,5 +126,19 @@ run "server_only_files_backend_ignored" {
   assert {
     condition     = length(kubernetes_persistent_volume_claim_v1.jobs) == 0
     error_message = "No shares should be created without the agentic components."
+  }
+}
+
+run "existing_resource_group" {
+  command = plan
+  variables {
+    create_resource_group = false
+    resource_group_name   = "platform-provided-rg"
+    enable_agentic        = true
+  }
+
+  assert {
+    condition     = length(azurerm_resource_group.this) == 0 && azurerm_kubernetes_cluster.this.resource_group_name == "platform-provided-rg"
+    error_message = "create_resource_group = false must reuse the named resource group and create none."
   }
 }

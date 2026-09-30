@@ -6,7 +6,7 @@
 resource "azurerm_log_analytics_workspace" "this" {
   name                = "${var.cluster_name}-logs"
   location            = var.location
-  resource_group_name = azurerm_resource_group.this.name
+  resource_group_name = local.resource_group_name
   sku                 = "PerGB2018"
   retention_in_days   = var.log_retention_days
   tags                = var.tags

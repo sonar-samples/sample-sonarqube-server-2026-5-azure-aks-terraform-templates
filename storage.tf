@@ -37,7 +37,7 @@ resource "azurerm_storage_account" "agentic" {
   count = local.use_blob ? 1 : 0
 
   name                     = var.storage_account_name
-  resource_group_name      = azurerm_resource_group.this.name
+  resource_group_name      = local.resource_group_name
   location                 = var.location
   account_tier             = "Standard"
   account_replication_type = var.storage_replication_type
@@ -72,7 +72,7 @@ resource "azurerm_private_dns_zone" "blob" {
   count = local.use_blob ? 1 : 0
 
   name                = "privatelink.blob.core.windows.net"
-  resource_group_name = azurerm_resource_group.this.name
+  resource_group_name = local.resource_group_name
   tags                = var.tags
 }
 
@@ -91,7 +91,7 @@ resource "azurerm_private_endpoint" "blob" {
 
   name                = "${var.storage_account_name}-blob"
   location            = var.location
-  resource_group_name = azurerm_resource_group.this.name
+  resource_group_name = local.resource_group_name
   subnet_id           = azurerm_subnet.private.id
   tags                = var.tags
 

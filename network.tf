@@ -11,28 +11,28 @@
 resource "azurerm_virtual_network" "this" {
   name                = "${var.cluster_name}-vnet"
   location            = var.location
-  resource_group_name = azurerm_resource_group.this.name
+  resource_group_name = local.resource_group_name
   address_space       = [var.vnet_cidr]
   tags                = var.tags
 }
 
 resource "azurerm_subnet" "aks" {
   name                 = "aks"
-  resource_group_name  = azurerm_resource_group.this.name
+  resource_group_name  = local.resource_group_name
   virtual_network_name = azurerm_virtual_network.this.name
   address_prefixes     = [var.aks_subnet_cidr]
 }
 
 resource "azurerm_subnet" "appgw" {
   name                 = "appgw"
-  resource_group_name  = azurerm_resource_group.this.name
+  resource_group_name  = local.resource_group_name
   virtual_network_name = azurerm_virtual_network.this.name
   address_prefixes     = [var.appgw_subnet_cidr]
 }
 
 resource "azurerm_subnet" "postgresql" {
   name                 = "postgresql"
-  resource_group_name  = azurerm_resource_group.this.name
+  resource_group_name  = local.resource_group_name
   virtual_network_name = azurerm_virtual_network.this.name
   address_prefixes     = [var.postgresql_subnet_cidr]
 
@@ -47,7 +47,7 @@ resource "azurerm_subnet" "postgresql" {
 
 resource "azurerm_subnet" "private" {
   name                 = "private"
-  resource_group_name  = azurerm_resource_group.this.name
+  resource_group_name  = local.resource_group_name
   virtual_network_name = azurerm_virtual_network.this.name
   address_prefixes     = [var.private_subnet_cidr]
 }
@@ -74,7 +74,7 @@ resource "azurerm_role_assignment" "aks_network" {
 resource "azurerm_public_ip" "appgw" {
   name                = "${var.cluster_name}-appgw-pip"
   location            = var.location
-  resource_group_name = azurerm_resource_group.this.name
+  resource_group_name = local.resource_group_name
   allocation_method   = "Static"
   sku                 = "Standard"
   tags                = var.tags
