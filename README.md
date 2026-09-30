@@ -146,8 +146,12 @@ shell history.
   Application Gateway forwards to the Server's internal load balancer; nothing listens on a
   public address except the gateway.
 - **Cilium enforces the chart's NetworkPolicies.** AKS accepts NetworkPolicy objects on a cluster
-  with no policy engine and enforces none of them. Test an allowed and a denied destination from a
-  runtime pod before production use.
+  with no policy engine and enforces none of them. Before production use, verify from inside each
+  runtime pod that an allowlisted host connects through the proxy (`200`), an unlisted host is
+  refused (`403`), and a direct connection to the allowlisted host's IP with the proxy bypassed
+  fails with curl exit 7 or 28. The blueprint's "Verify runtime egress isolation" step has the
+  copy-paste commands. Test the direct path by IP: the runtime policy allows no DNS, so a direct
+  request by name fails at resolution and proves nothing about the connection.
 - **Every agentic component is pinned to the `agentic` pool explicitly.** The chart falls back to
   the Server's top-level `nodeSelector` and `tolerations` for any component that sets none, which
   would co-schedule the runtimes with the Server. Keep the explicit scheduling if you fork
