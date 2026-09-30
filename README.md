@@ -37,9 +37,10 @@ Application Gateway, without the agentic capabilities.
   (Enterprise Edition licensing alone does not enable them). SonarQube Server must use the new
   license management, not Server ID based licensing.
 - An existing Azure DNS zone for your domain, delegated from your registrar.
-- The identity running Terraform needs **Owner** (or Contributor plus User Access Administrator)
-  on the subscription, because the module grants the cluster identity Network Contributor on the
-  VNet, and **DNS Zone Contributor** on the DNS zone for the ACME DNS-01 challenge.
+- The identity running Terraform needs **DNS Zone Contributor** on the DNS zone for the ACME
+  DNS-01 challenge. With the default `sonarqube_exposure = "internal"` it also needs **Owner** (or
+  Contributor plus User Access Administrator), because the module grants the cluster identity
+  Network Contributor on the VNet. With Contributor alone, use `gateway-restricted`.
 - Shared key access must be allowed on storage accounts. The object-store library authenticates
   to Azure by connection string only; an Azure Policy that disables shared key access breaks it.
 - A region permitted by any allowed-locations Azure Policy, with availability zones (for
@@ -102,6 +103,7 @@ shell history.
 | `storage_account_name` | `""` | Required with the agentic components. Globally unique, 3–24 lowercase alphanumerics |
 | `location` | `westeurope` | Must satisfy allowed-locations policy, zones and vCPU quota |
 | `resource_group_name` | `sonarqube-2026-5` | |
+| `sonarqube_exposure` | `internal` | `gateway-restricted` needs no role assignment; the Server's load balancer IP admits only the gateway |
 | `create_resource_group` | `true` | `false` deploys into an existing resource group named `resource_group_name` |
 | `cluster_name` | `sonarqube-aks` | |
 | `postgres_name` | `sonarqube-pg` | Globally unique across Azure; `plan` will not catch a collision |
