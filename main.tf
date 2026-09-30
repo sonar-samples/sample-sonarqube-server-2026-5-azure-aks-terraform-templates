@@ -31,7 +31,7 @@ locals {
 
 # NOTE: these providers read credentials from a cluster created in the same apply.
 # That resolves on apply, but is a known weak point on `terraform destroy` and on a
-# refresh after the cluster is gone. See README "Known limitations".
+# refresh after the cluster is gone. See README "Notes".
 provider "kubernetes" {
   host                   = local.kube.host
   client_certificate     = base64decode(local.kube.client_certificate)

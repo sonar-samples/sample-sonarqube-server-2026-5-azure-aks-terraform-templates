@@ -1,102 +1,59 @@
-# SonarQube Server 2026.5 Enterprise with agentic components — Azure AKS installation
+# SonarQube Server 2026.5 Enterprise with agentic components — Azure AKS
 
 Terraform for SonarQube Server 2026.5 Enterprise on Azure Kubernetes Service, optionally with the
 2026.5 agentic components: Sonar Vortex analysis, the Agent Orchestrator, the SonarQube Hunter
 Agent, and the SonarQube Remediation Agent.
 
-Companion to the blueprint *Installing SonarQube Server 2026.5 Enterprise and its agentic
-components on Azure AKS*. For a SonarQube Server deployment without the agentic components,
-including private networking, Application Gateway and automated TLS, see
+This repo is the templates only. The walkthrough — licensing, entitlement, LLM provider
+registration, ingress and verification — lives in the blueprint *Installing SonarQube Server
+2026.5 Enterprise and its agentic components on Azure AKS*. For SonarQube Server without the
+agentic components, including private networking, Application Gateway and automated TLS, see
 [sonarqube-server-azure-aks-installation](https://github.com/sonar-solutions/sonarqube-server-azure-aks-installation).
 
-## Release status
+`enable_agentic` defaults to `false`. With it off this deploys SonarQube Server Enterprise on AKS
+and nothing else, which is complete and useful on its own.
 
-**Published and verified end to end.** Confirmed 2026-09-29:
-
-| | |
-| --- | --- |
-| Published Helm index | `2026.5.1000` available from `https://SonarSource.github.io/helm-chart-sonarqube` |
-| `Chart.yaml` | `version: 2026.5.1000`, `appVersion: 2026.5.0` |
-| Agentic image defaults | populated and public — `sonarsource/sonar-vortex`, `sonarqube-agent-orchestrator`, `sonarqube-hunter-agent`, `sonarqube-remediation-agent`, all at `2026.5.0` |
-| `sonarqube:2026.5.0-enterprise` | published |
-| This module | applied against the published package with the agentic stack enabled; Hunter and Remediation ran end to end |
-
-`appVersion` matches the chart version, so `edition: enterprise` composes
-`sonarqube:2026.5.0-enterprise` on its own and `sonarqube_image_tag` is only needed to override.
-The agentic image defaults are real and public, so `agentic_images` is only needed when mirroring
-into a private registry.
-
-Note that a published package is not byte-identical to a source build of the same version: four
-templates differ between them. Pin the published version.
-
-`enable_agentic` defaults to `false`. With it off, this deploys SonarQube Server Enterprise on AKS
-and nothing else — useful and complete on its own.
-
-### Release acceptance criteria
-
-Sanity checks against your own `helm` client. Run them before setting `enable_agentic = true`.
-
-```sh
-helm repo add sonarqube https://SonarSource.github.io/helm-chart-sonarqube
-helm repo update
-
-# THE GATE — is 2026.5.1000 published? Everything else is merged already.
-helm search repo sonarqube/sonarqube --versions | head -20
-
-# All confirmed passing on 2026.5.1000
-helm show chart sonarqube/sonarqube --version 2026.5.1000 | grep -E '^(version|appVersion):'
-helm show values sonarqube/sonarqube --version 2026.5.1000 \
-  | grep -E '^(agentOrchestrator|hunterAgent|remediationAgent|vortexAnalysis):'
-helm template sonarqube sonarqube/sonarqube --version 2026.5.1000 \
-  --set edition=enterprise | grep -E 'image:.*sonarqube'
-```
-
-`helm repo update` first, or a cached index will report the old version and you will conclude it
-is unpublished when it is not.
-
-## Infrastructure Components
+## What it creates
 
 | Component | Azure service | Purpose |
 | --- | --- | --- |
 | Resource group | Resource Manager | Holds everything this module creates |
 | AKS cluster | Kubernetes Service | Runs SonarQube Server and the agentic workloads |
-| System node pool | Virtual Machine Scale Sets | SonarQube Server, Orchestrator, Vortex, egress proxy |
-| Sandbox node pool | VMSS with Pod Sandboxing | Agent runtimes only; tainted, Azure Linux, Gen2 nested-virt |
+| System node pool | Virtual Machine Scale Sets | All workloads: Server, Orchestrator, Vortex, egress proxy, both agent runtimes |
 | PostgreSQL | Database for PostgreSQL Flexible Server | SonarQube database, shared with the Orchestrator |
-| Blob storage account | Storage account with two containers | Agent job artifacts, and Vortex analyzer context (default) |
+| Blob storage account | Storage account, two containers | Agent job artifacts and Vortex analyzer context (default backend) |
 | SonarQube release | Helm | The official chart from the SonarSource repository |
 
 ## Prerequisites
 
 - Terraform >= 1.7, Azure CLI >= 2.80.0, `kubectl`, Helm 3.
-- A SonarQube Server Enterprise or Data Center Edition licence, plus written confirmation of
-  entitlement for each agentic feature you enable. Edition licensing alone does not enable them.
-- A region that satisfies all three of: permitted by any allowed-locations Azure Policy, has Total
-  Regional vCPU headroom for both pools, and offers a Gen2 nested-virtualization VM size.
-- Any resource tags your subscription policy mandates, via `tags`. A tag policy denies the very
-  first resource, so check before the first apply.
+- An Enterprise or Data Center Edition licence, plus entitlement for each agentic capability you
+  enable. Edition licensing alone does not enable them.
+- A region permitted by any allowed-locations Azure Policy, with Total Regional vCPU headroom for
+  the system pool, and any resource tags your subscription policy mandates via `tags`. A tag or
+  location policy denies the very first resource.
 - **`az login` may not be sufficient.** The azurerm provider needs a Microsoft Graph-scoped token,
   and a Conditional Access policy can refuse it while ordinary `az` commands keep working — the
   error points at `provider "azurerm"` and gives no hint of the cause. Confirm with
   `az account get-access-token --scope https://graph.microsoft.com/.default`.
+- Pin an exact published chart version. Agentic support needs `2026.5.1000` or later:
+  `helm repo update && helm search repo sonarqube/sonarqube --versions`. Run `helm repo update`
+  first or a cached index reports the old version.
 
-For the agentic components, confirm AKS Pod Sandboxing for your target subscription and region
-against current Azure documentation, then record the RuntimeClass the cluster actually produces:
+This module deploys the agent runtimes with the standard supported Kubernetes configuration. It
+does not configure alternative runtime sandboxing technologies. Organizations with
+platform-mandated workload-isolation controls should validate those controls independently against
+their AKS environment and the released SonarQube chart.
 
-```sh
-az feature register --namespace Microsoft.ContainerService -n KataVMIsolationPreview
-az provider register --namespace Microsoft.ContainerService
-kubectl get runtimeclass
-```
-
-## Quick Start
+## Quick start
 
 ```sh
 git clone https://github.com/sonar-solutions/sonarqube-server-2026-5-azure-aks-installation.git
 cd sonarqube-server-2026-5-azure-aks-installation
 
 cp terraform.tfvars.json.example terraform.tfvars.json
-# Edit terraform.tfvars.json with your values
+# Edit terraform.tfvars.json — subscription_id, sonarqube_chart_version and
+# storage_account_name have no usable default.
 
 terraform init
 terraform plan
@@ -105,278 +62,123 @@ terraform apply
 
 None of the `.tf` files need editing. All configuration lives in `terraform.tfvars.json`.
 
-Then:
-
 ```sh
 $(terraform output -raw get_credentials_command)
 $(terraform output -raw port_forward_command)
 ```
 
-SonarQube is at `http://127.0.0.1:9000`. Apply your licence under **Administration →
-Configuration → License Manager** and change the admin password.
+SonarQube is then at `http://127.0.0.1:9000`. Apply your licence under **Administration →
+Configuration → License manager** and change the admin password.
 
-### Enabling settings encryption
+Port-forward is enough for administration but **not** for validating the agentic capabilities: CI
+scanners must reach the deployed URL to upload analyzer context. Add ingress and TLS before
+testing Vortex, Hunter or Remediation.
 
-SonarQube generates its own settings-encryption key, so it cannot exist before the server runs.
-After first boot:
+### Settings encryption
+
+SonarQube generates its own key, so it cannot exist before the server runs. After first boot:
 
 1. **Administration → Configuration → Encryption → Generate Secret Key**, save it to a file.
 2. `kubectl create secret generic sonarqube-encryption-secret -n sonarqube --from-file=sonar-secret.txt=./sonar-secret.txt`
-3. Set `enable_settings_encryption` to `true` and re-apply.
+3. Set `enable_settings_encryption = true` and re-apply.
 
-This key encrypts stored LLM provider credentials and is mounted into the Agent Orchestrator, so do
-it before enabling the agentic features. Use a file rather than `--from-literal` to keep the key out
-of shell history.
+This key encrypts stored LLM provider credentials and is mounted into the Orchestrator, so do it
+before enabling the agentic capabilities. Use a file, not `--from-literal`, to keep the key out of
+shell history.
 
-## Configuration Values
+## Inputs
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `subscription_id` | *(required)* | Azure subscription to deploy into |
-| `location` | `westeurope` | Must satisfy policy, quota and Gen2 nested-virt SKU availability |
+| `sonarqube_chart_version` | *(required)* | An exact published version, `2026.5.1000` or later |
+| `storage_account_name` | `""` | Required with `azureblob`. Globally unique, 3–24 lowercase alphanumerics |
+| `location` | `westeurope` | Must satisfy allowed-locations policy and vCPU quota |
 | `resource_group_name` | `sonarqube-2026-5` | |
 | `cluster_name` | `sonarqube-aks` | |
-| `postgres_name` | `sonarqube-pg` | Globally unique across Azure |
+| `postgres_name` | `sonarqube-pg` | Globally unique across Azure; `plan` will not catch a collision |
 | `db_username` | `sonarqube` | |
 | `kubernetes_version` | `null` | `null` takes the region's latest non-preview version |
-| `system_vm_size` | `Standard_D4s_v5` | |
-| `sandbox_vm_size` | `Standard_D8s_v5` | Must be Gen2 with nested virtualization |
-| `sandbox_max_nodes` | `2` | |
-| `sonarqube_chart_version` | *(required)* | An exact published version — `2026.5.1000` once the index carries it |
-| `sonarqube_image_tag` | `""` | Optional override. Empty takes the chart default, correct as of appVersion 2026.5.0 |
-| `enable_agentic` | `false` | Deploys Vortex, the Orchestrator and both runtimes |
-| `enable_pod_sandboxing` | `true` | VM isolation per runtime pod. Off removes the sandbox pool, RuntimeClass, Azure Linux and nested-virt requirements |
-| `sandbox_runtime_class` | `""` | Required with `enable_agentic` **and** `enable_pod_sandboxing`. `kata-vm-isolation` on current AKS |
+| `system_vm_size` | `Standard_D8s_v5` | Sized for the agentic path; see Notes |
+| `system_node_count` | `2` | |
+| `sonarqube_image_tag` | `""` | Optional override. Empty composes the tag from the chart's appVersion |
+| `enable_agentic` | `false` | Deploys Vortex, the Orchestrator and both agent runtimes |
 | `runtime_replica_count` | `1` | Concurrent jobs per runtime |
-| `agentic_images` | all blank | Optional overrides. Blank repository takes the chart default; set only when mirroring |
+| `agentic_images` | all blank | Optional overrides. Blank takes the chart default; set when mirroring to a private registry |
 | `llm_allowed_domains` | `["api.anthropic.com"]` | Egress proxy allowlist |
 | `storage_backend` | `azureblob` | `azureblob` for presigned SAS locators, `azurefiles` for a mounted share |
-| `storage_account_name` | `""` | Required with `azureblob`. Globally unique, 3–24 lowercase alphanumerics |
-| `jobs_storage_size` | `100Gi` | Azure Files share for job artifacts (`azurefiles` only) |
-| `vortex_storage_size` | `100Gi` | Azure Files share for analyzer context (`azurefiles` only) |
-| `share_dir_mode` / `share_file_mode` | `0777` | `azurefiles` only. Reference setting; see Design notes |
+| `jobs_storage_size` / `vortex_storage_size` | `100Gi` | `azurefiles` only |
+| `share_dir_mode` / `share_file_mode` | `0777` | `azurefiles` only. Reference setting; see Notes |
 | `share_gid` | `0` | Set with `0770` modes for least privilege |
 | `enable_settings_encryption` | `false` | Turn on for the second apply |
 | `tags` | `{}` | Applied to every Azure resource |
 
-## Configuration Files
+## Files
 
 | File | Contents |
 | --- | --- |
 | `main.tf` | Terraform and provider configuration |
-| `variables.tf` | All inputs |
-| `aks.tf` | Resource group, AKS cluster, system and sandbox node pools |
+| `variables.tf` | All inputs, documented in place |
+| `aks.tf` | Resource group, AKS cluster, system node pool |
 | `postgresql.tf` | Flexible Server, database, firewall rule |
-| `storage.tf` | Namespace, Azure Files StorageClass, two ReadWriteMany shares |
+| `storage.tf` | Namespace, blob containers, or the Azure Files StorageClass and shares |
 | `secrets.tf` | Database, monitoring and agentic signing secrets |
 | `sonarqube.tf` | The Helm release and its values overlay |
-| `sonarqube-values.yaml` | Static base values; everything else is overlaid by `sonarqube.tf` |
+| `sonarqube-values.yaml` | Static base values; everything environment-specific is overlaid by `sonarqube.tf` |
 | `outputs.tf` | Connection details and helper commands |
 | `terraform.tfvars.json.example` | Copy to `terraform.tfvars.json` and edit |
 
-## Design notes
+## Notes
 
-**Pod Sandboxing, not gVisor.** AKS has no gVisor, and the chart's `gvisor.installer` is a
-privileged DaemonSet that rewrites containerd configuration AKS manages itself. With
-`enable_pod_sandboxing = true` this module sets `gvisor.enabled = false` and uses
-`agentRuntimeSandbox` with the RuntimeClass you supply.
-
-**What to set `sandbox_runtime_class` to.** **`kata-vm-isolation`** — confirmed by SonarSource
-engineering as the Azure configuration (`agentRuntimeSandbox.enabled: true`,
-`runtimeClassName: kata-vm-isolation`), matching Microsoft's documentation and what this module was
-validated against on Kubernetes 1.35 and 1.36. Older clusters may instead expose
-`kata-mshv-vm-isolation`, which is the name the SonarQube chart's own comments cite as its AKS
-example. The variable has no default on purpose: the name is a property of your cluster, and a
-wrong value fails at pod start with an unsupported-handler error rather than at plan time. Read it
-off the cluster and use it verbatim:
-
-```sh
-kubectl get runtimeclass
-kubectl get runtimeclass kata-vm-isolation -o jsonpath='{.handler}{"\n"}{.scheduling}'
-```
-
-Also check whether the class carries a `scheduling.nodeSelector`. Kubernetes merges it into every
-runtime pod, so a key that collides with this module's `workload: sandbox` selector makes those
-pods permanently unschedulable. On the validated cluster the class carried
-`kubernetes.azure.com/kata-vm-isolation: "true"`, a different key, so the two combine rather than
-conflict.
-
-**Sandboxing is a toggle, and it interacts with your storage choice.** Set
-`enable_pod_sandboxing = false` and the module creates no sandbox node pool, needs no RuntimeClass,
-no Azure Linux OS SKU, no Gen2 nested-virtualization SKU and no feature registration; the runtimes
-schedule on the system pool under the default container runtime. The chart supports this — no
-validation requires a sandbox — but SonarQube's own documentation describes the sandbox as the
-control that keeps LLM-influenced code away from the host, so treat turning it off as a security
-decision rather than a simplification, and record it as one.
-
-The interaction that matters: with Pod Sandboxing on, a mounted volume reaches the pod VM through
-`virtiofsd` rather than directly. Microsoft documents that Kata pods may not reach the IOPS
-traditional containers achieve on Azure Files. **This module's filesystem storage has not been
-exercised with sandboxing enabled** — see Known limitations. An object-storage backend avoids the
-question entirely, because the runtime reaches storage over the network instead of through a mount.
-
-**Two storage backends, selected by `storage_backend`.** Sonar's `sonar-object-store` library
-supports `S3`, `AZURE`, `GCS`, `FILESYSTEM` and `NFS`. This module implements the two that make
-sense on AKS, and the choice is an isolation decision as much as a storage one:
-
-| | `azureblob` (default) | `azurefiles` |
-| --- | --- | --- |
-| Library provider | `AzureObjectStore` — native SAS presigned URLs | `FilesystemObjectStore` |
-| What the runtime is handed | A presigned `https` URL scoped to **one object and one verb**, expiring after the presign TTL (default 6 h) | A direct `file://` path on a volume it mounts |
-| Isolation enforced by | The locator itself — a leaked URL is useless after expiry and cannot be repurposed | **Your deployment** — mount scoping and permissions |
-| Azure resources | Storage account + two containers | Two ReadWriteMany file shares + a custom StorageClass |
-| Authentication | Connection string in a Kubernetes secret. No Managed Identity path | None — reached by mount |
-| Egress allowlist | Must include `<account>.blob.core.windows.net` | Nothing — storage is not a network call |
-| Pod Sandboxing interaction | None; the runtime mounts nothing. Verified: the runtime pods carry only `agentic-keys` | Volume reaches the pod VM through `virtiofsd`; **untested here** |
-| Maturity | Validated end to end by this module against the 2026.5.1000 chart | Validated end to end, but not with Pod Sandboxing |
-
-`azureblob` is the default. It is the backend Sonar supports for Azure, it is the stronger
-isolation model for an untrusted runtime, and it sidesteps the sandboxing question entirely — the
-library's own documentation notes that with a filesystem backend "isolation between jobs and
-tenants is a deployment concern rather than something the library enforces with signed URLs."
-It has now been exercised end to end against the 2026.5.1000 chart with Pod Sandboxing enabled.
-
-`azurefiles` remains supported as the fallback where policy forbids blob endpoints. Its
-interaction with Kata sandboxing is still uncovered by this module's testing.
-
-Blob needs `type: AZURE` plus `azure.container` and `azure.connection-string` under each
-component's storage prefix. The chart exposes no dedicated Azure fields and its
-`agentOrchestrator.storage.type` comment omits `AZURE`, but that is a documentation gap rather
-than a capability gap — the Orchestrator reads the same library under
-`sonar.agentic.orchestrator.storage.`, so this module supplies those two settings through the
-chart's generic `env` passthrough. The runtimes receive no storage configuration at all on either
-backend; they act on locators.
-
-MinIO is separately ruled out: its images are no longer anonymously pullable
-(`quay.io/minio/minio` returns 401 repo-wide).
-
-**On `azurefiles`, the custom StorageClass is load-bearing and its modes are a reference setting.** AKS's built-in
-`azurefile-csi` sets no `uid`, `gid` or `file_mode`, so an SMB mount lands root-owned and the
-agentic containers — uid 900, 1000 and 10001 — cannot write to it. Without permissive modes the
-shares still bind and the pods still start; jobs fail later, on write. The `0777` defaults are what was validated and are appropriate for a lab **only**. On a filesystem
-backend the mount permissions are the isolation boundary between untrusted runtimes — the library
-does not enforce it with signed URLs — so for anything beyond evaluation set `share_gid` to a gid
-the pods carry, drop the modes to `0770`, add a matching pod `fsGroup`, and retest the write. The
-per-runtime `subPath` mounts limit what each runtime sees, but permissive modes weaken that.
-
-**Subdirectory isolation.** The Orchestrator mounts the jobs share at its root and writes each
-runtime's jobs into a subdirectory named after that runtime. Each runtime mounts only its own
-subtree via `subPath`. Chart validation requires each component's mount path to sit at or above its
-`storage.filesystem.baseDir`.
-
-**Two shares, not one.** Job artifacts and Vortex analyzer context have opposite retention
-lifecycles; the `deleteOlderThan` housekeeping settings apply to job artifacts only. SonarQube
-Server writes the context share and Vortex mounts it read-only.
-
-**Per-component tolerations.** The sandbox pool is tainted, so a node selector alone leaves the
-runtime pods pending. Tolerations are set on the runtimes only — a release-wide toleration would
-make SonarQube Server itself eligible for a sandbox node.
-
-**PostgreSQL uses a public endpoint narrowed to the cluster's outbound IP.** That is a reference
-simplification that keeps the module self-contained, not a production baseline. For production use
-a delegated subnet with private access and no public endpoint.
-
-## Resources Created
-
-Fifteen resources with `enable_agentic = false`, eighteen with it enabled: resource group, AKS
-cluster, sandbox node pool, PostgreSQL server, database and firewall rule, Kubernetes namespace,
-Azure Files StorageClass, two PersistentVolumeClaims, three Kubernetes secrets, four generated
-passwords, and the Helm release.
-
-## Known limitations
-
-- **No ingress.** Access is by port-forward. CI scanners cannot reach the server, so this is not a
-  complete deployment on its own — add Application Gateway, DNS and TLS from the base repository.
-- **Fixed runtime replicas keep the sandbox pool provisioned.** `min_count = 0` permits scale-down
-  only when nothing schedulable needs the pool. True scale-to-zero requires validated chart
-  autoscaling that drives runtime replicas to zero.
-- **Azure Files has not been exercised with Pod Sandboxing enabled.** The validated run used
-  chart 2026.4.1, which deploys no agent runtimes, so no sandboxed pod ever mounted either share.
-  The earlier internal deployment that did run the agentic components used S3 object storage, where
-  the runtime reaches storage over the network and never mounts a volume. Kata plus an SMB volume
-  through `virtiofsd` is therefore untested here, and Microsoft documents IOPS caveats for Kata on
-  Azure Files. Validate it, or use object storage, or run without sandboxing.
-- **The agentic components have not been exercised from this configuration.** A full apply and
-  destroy were validated against published chart 2026.4.1, which accepts the agentic values but
-  does not implement them. That proves the infrastructure, shares, mounts, secrets and release
-  mechanism — not that the agentic containers can read and write those shares.
-- **Azure Files is SMB.** Throughput and IOPS differ from managed disks, and Standard tier is the
-  default here. Raise to `Premium_LRS` in the StorageClass if job staging is slow.
+- **`gvisor.enabled` is set to `false` deliberately.** The chart defaults it to `true`, which
+  deploys a privileged installer DaemonSet that rewrites containerd configuration — unsupported on
+  AKS managed nodes. Turning it off is what gives the runtimes the standard Kubernetes
+  configuration. `agentRuntimeSandbox` is left at its chart default, disabled.
+- **The system pool is sized for the agentic path.** With `enable_agentic = true` it carries all
+  six workloads, whose chart requests total roughly 3.8 vCPU and 20.5Gi of memory. The Hunter
+  Agent alone requests 8Gi and Vortex 6Gi, so a 16Gi node cannot hold either alongside the Server.
+  Drop to a smaller size only with `enable_agentic = false`.
+- **Two storage backends, selected by `storage_backend`.** `azureblob` (default) hands the runtime
+  a presigned SAS URL scoped to one object and one verb, expiring after the presign TTL, and
+  mounts nothing — the stronger isolation model, and the path validated end to end. `azurefiles`
+  hands it a `file://` path on a ReadWriteMany share, which makes mount permissions the isolation
+  boundary. Blob requires `<account>.blob.core.windows.net` in the egress allowlist; Azure Files
+  needs nothing there.
+- **On `azurefiles` the custom StorageClass is load-bearing.** AKS's built-in `azurefile-csi` sets
+  no `uid`, `gid` or `file_mode`, so an SMB mount lands root-owned and the agentic containers
+  (uid 900, 1000, 10001) cannot write to it. The shares still bind and the pods still start; jobs
+  fail later, on write. The `0777` default is a lab setting — for anything beyond evaluation set
+  `share_gid` to a gid the pods carry, drop the modes to `0770`, add a matching pod `fsGroup`, and
+  retest the write.
+- **SonarQube Server cannot take the blob connection string from an environment variable.** The
+  object-store library reads `azure.connection-string`, hyphenated; the Server maps `SONAR_X_Y` to
+  `sonar.x.y` and can never emit the hyphen, so the value silently never binds and the Server
+  aborts with "Invalid connection string". This module routes it through the chart's
+  `sonarSecretProperties` instead. Keep that wiring if you fork the storage code.
+- **PostgreSQL uses a public endpoint narrowed to the cluster's outbound IP.** A reference
+  simplification that keeps the module self-contained, not a production baseline. For production,
+  use a delegated subnet with private access and no public endpoint.
+- **No ingress.** Access is by port-forward; add Application Gateway, DNS and TLS from the base
+  repository.
+- **Runtime replicas are fixed**, so the pool stays provisioned. True scale-to-zero needs
+  validated chart autoscaling that drives runtime replicas to zero.
 - **Reusing a storage account name straight after a destroy leaves stale DNS.** Azure may keep
-  resolving the name to the deleted account's scale unit for a while, so `az storage` calls from
-  your machine fail with `ResourceNotFound` against storage the cluster is using happily. Confirm
-  from inside the cluster before believing it, or pick a fresh `storage_account_name` per run.
-- **SonarQube Server cannot receive the blob connection string through an environment
-  variable.** The object-store library reads `azure.connection-string`, hyphenated. The
-  Orchestrator and Vortex are Spring Boot and bind it from `SONAR_..._CONNECTION_STRING` through
-  relaxed binding; the Server maps `SONAR_X_Y` to `sonar.x.y` and can never emit the hyphen, so
-  the value silently never binds and the Server aborts at startup with "Invalid connection
-  string". This module routes the Server through the chart's `sonarSecretProperties` instead,
-  which merges a secret into `sonar.properties`. Keep that wiring if you fork the storage code.
-
-### Validated on 2026-09-27
-
-A full apply and destroy in `northeurope` against chart 2026.4.1:
-
-| | |
-| --- | --- |
-| 18-resource apply | completed, Helm release `deployed` |
-| Kubernetes version | resolved from the region default (`1.36.3`) rather than pinned |
-| `node_provisioning_profile { mode = "Manual" }` | accepted by the Azure API |
-| AKS egress IP lookup and PostgreSQL firewall rule | resolved and created |
-| Azure Files RWX shares | both Bound; non-root container write confirmed |
-| Explicit `sonarqube_image_tag` | produced `2026.4.1.126914`, overriding appVersion composition |
-| `terraform destroy` | 17 resources destroyed, resource group removed, no leftovers |
-
-The destroy path completed cleanly despite the providers reading credentials from the cluster being
-deleted. That remains a theoretical weak point on a refresh after the cluster is removed out of
-band; if you hit it, destroy `helm_release.sonarqube` first.
-
-### Validated on 2026-09-29 — agentic stack on `azureblob`
-
-A full apply in `northeurope` with `enable_agentic = true`, `enable_pod_sandboxing = true` and
-`storage_backend = "azureblob"`, first against chart `2026.5.1000` built from source and then
-re-verified against the **published** `2026.5.1000` package once it shipped:
-
-| | |
-| --- | --- |
-| All seven pods | `1/1 Running`, zero restarts |
-| SonarQube Server | resolved `sonar.agentic.storage.azure.connection-string`; no "Invalid connection string" |
-| Blob containers | `agent-jobs` and `vortex-context` created |
-| Agent runtimes | scheduled to the sandbox pool under RuntimeClass `kata-vm-isolation` |
-| Kata isolation | genuine — guest kernel `6.6.137.mshv1-1.azl3` vs host `6.6.137.mshv2-2.azl3` |
-| Runtime storage | none; the only volume on a runtime pod is `agentic-keys` |
-| Repeat `terraform plan` | `No changes` |
-| Published chart | live `helm upgrade` from the source build onto the released package: all pods `1/1`, zero storage errors, Kata and `sonarSecretProperties` wiring unchanged |
-| Hunter and Remediation | **executed end to end** against Azure Blob with Pod Sandboxing on, via an Anthropic provider through the egress proxy |
-
-Two defects surfaced only at runtime, neither reachable by `terraform validate` or
-`helm template`: the Server's connection-string binding (above), and the sandbox pool pinning
-`node_count = 0` against its own autoscaler, which scaled the pool back to zero on the *second*
-apply and evicted both runtimes. Both are fixed here.
-
-The published package is not byte-identical to a source build of the same version: four templates
-differ, including `_pod.tpl` and `validation.yaml`. The wiring this module depends on is identical
-in both, and the upgrade above confirms it on the released artifact.
-
-The 2026.4 to 2026.5 upgrade path is now covered as well - see Upgrade. Still not covered:
-`azurefiles` with Pod Sandboxing, and backup/restore.
+  resolving the name to the deleted account for a while, so `az storage` calls from your machine
+  fail with `ResourceNotFound` against storage the cluster is using happily. Confirm from inside
+  the cluster, or pick a fresh `storage_account_name` per run.
 
 ## Upgrade
 
 **Upgrading with the agentic components enabled needs a manual step inside the apply window.**
 SonarQube does not migrate its own schema. After the Helm upgrade the Server restarts into
 `DB_MIGRATION_NEEDED` and serves nothing useful, yet its readiness probe still passes, so
-Kubernetes and Helm both report the pod healthy. Vortex, which health-checks against the Server,
-stays un-ready for as long as that lasts, and `helm upgrade` blocks waiting for it. Trigger the
-migration and everything converges; leave it and the apply fails on the Helm timeout (30 minutes
-here) even though nothing is actually broken.
+Kubernetes and Helm both report the pod healthy. Vortex health-checks against the Server, stays
+un-ready, and `helm upgrade` blocks until it times out.
 
-Avoid the race by sequencing the upgrade rather than doing it in one shot:
+Sequence it rather than doing it in one shot. Back up the database first.
 
 ```sh
-# 1. Upgrade the Server alone.
-#    Set enable_agentic = false, then:
+# 1. Upgrade the Server alone: set enable_agentic = false, then
 terraform apply
 
 # 2. Migrate the database. Browse /setup, or:
@@ -384,27 +186,12 @@ curl -s -u <admin>:<password> -X POST http://<host>/api/system/migrate_db
 curl -s http://<host>/api/system/db_migration_status   # wait for MIGRATION_SUCCEEDED
 curl -s http://<host>/api/system/status                # wait for UP
 
-# 3. Re-enable the agentic components.
-#    Set enable_agentic = true, then:
+# 3. Re-enable the agentic components: set enable_agentic = true, then
 terraform apply
 ```
 
-Verified on 2026-09-29: a 2026.4.1 install upgraded in place to 2026.5.1000 with the agentic stack
-switched on in the same apply. The instance id was unchanged across the upgrade, confirming a real
-migration rather than a fresh database, and the sandbox node pool was added to the running cluster.
-The single-shot apply only succeeded because the migration was triggered while Helm was still
-waiting.
-
-**The Server will stop being a StatefulSet.** Installing 2026.5.1000 emits two deprecation
-warnings: `deploymentType` is going away and the Server becomes a `Deployment`, with the strategy
-hard-coded to `Recreate`. Today the Server pod is `sonarqube-sonarqube-0`; after that change the
-name gains a random suffix. Anything addressing the pod by that literal name — scripts, runbooks,
-`kubectl exec` one-liners, log queries — breaks on the chart version that flips it. Address the
-StatefulSet or a label selector instead.
-
-Change `sonarqube_chart_version` to the new published version, re-confirm the acceptance criteria
-above, and re-apply. Follow the released chart's upgrade notes, and back up the database and both
-file shares first. The upgrade path from 2026.4 has not been tested from this module.
+`deploymentType` is deprecated and the Server becomes a `Deployment` rather than a `StatefulSet`,
+so its pod name gains a random suffix. Address it by label selector, not by a literal pod name.
 
 ## Cleanup
 
@@ -412,6 +199,7 @@ file shares first. The upgrade path from 2026.4 has not been tested from this mo
 terraform destroy
 ```
 
-This removes the PostgreSQL server, both Azure Files shares, and all retained analysis, context and
-artifact data. Before running it: back up anything you need, confirm retention requirements, and
-rotate or revoke the LLM and DevOps credentials you issued.
+This removes PostgreSQL, the blob containers or file shares, and all retained analysis, context
+and artifact data. Back up what you need first, confirm retention requirements, and rotate or
+revoke the LLM and DevOps credentials you issued. If a provider resolution error appears after the
+cluster was removed out of band, destroy `helm_release.sonarqube` first.

@@ -9,17 +9,14 @@
 
   "kubernetes_version": null,
 
-  "system_vm_size": "Standard_D4s_v5",
-  "sandbox_vm_size": "Standard_D8s_v5",
-  "sandbox_max_nodes": 2,
+  "system_vm_size": "Standard_D8s_v5",
+  "system_node_count": 2,
 
   "sonarqube_chart_version": "2026.5.1000",
   "sonarqube_image_tag": "",
 
   "enable_agentic": false,
 
-  "enable_pod_sandboxing": true,
-  "sandbox_runtime_class": "kata-vm-isolation",
   "runtime_replica_count": 1,
 
   "agentic_images": {

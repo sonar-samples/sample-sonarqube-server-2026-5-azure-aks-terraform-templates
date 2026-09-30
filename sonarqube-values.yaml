@@ -1,17 +1,16 @@
 # Static base values for the SonarQube Helm chart.
 #
 # Everything environment-specific — the database address, the Server image tag, the agentic
-# components, storage paths and the sandbox RuntimeClass — is overlaid by sonarqube.tf via
-# yamlencode, so this file needs no substitution and stays readable.
+# components and storage paths — is overlaid by sonarqube.tf via yamlencode, so this file needs
+# no substitution and stays readable.
 
 edition: enterprise
 
 monitoringPasscodeSecretName: "sonarqube-monitoring-passcode"
 monitoringPasscodeSecretKey: "passcode"
 
-# Confine SonarQube Server to the system pool. The sandbox pool is tainted, and the runtime
-# tolerations are set per-component rather than release-wide precisely so this pod can never
-# land there.
+# Pin SonarQube Server to the system pool by label, so scheduling stays explicit rather than
+# incidental if further pools are added.
 nodeSelector:
   workload: system
 

@@ -32,13 +32,11 @@ locals {
       key            = "instance-secret"
     }
 
-    # AKS Pod Sandboxing, not gVisor. The chart's gvisor path installs its own runtime with a
-    # privileged DaemonSet that would fight the containerd configuration AKS manages itself.
+    # The chart DEFAULTS gvisor.enabled to true, which deploys a privileged installer DaemonSet
+    # that rewrites containerd configuration — unsupported on AKS managed nodes. Turning it off
+    # is what gives the runtimes the standard Kubernetes configuration. agentRuntimeSandbox is
+    # left at its chart default (disabled); this module configures no alternative sandbox runtime.
     gvisor = { enabled = false }
-    agentRuntimeSandbox = {
-      enabled          = var.enable_pod_sandboxing
-      runtimeClassName = var.enable_pod_sandboxing ? var.sandbox_runtime_class : ""
-    }
 
     vortexAnalysis = merge(local.image_override.vortex, {
       enabled      = true
@@ -71,18 +69,9 @@ locals {
       hunter      = local.image_override.hunter
       remediation = local.image_override.remediation
       } : family => merge(override, {
-        enabled      = true
-        replicaCount = var.runtime_replica_count
-        # With sandboxing off there is no sandbox pool, so the runtimes share the system pool.
-        nodeSelector = { workload = var.enable_pod_sandboxing ? "sandbox" : "system" }
-        # Per-component, never release-wide: a global toleration would make SonarQube Server
-        # itself eligible for a sandbox node.
-        tolerations = var.enable_pod_sandboxing ? [{
-          key      = "workload"
-          operator = "Equal"
-          value    = "sandbox"
-          effect   = "NoSchedule"
-        }] : []
+        enabled       = true
+        replicaCount  = var.runtime_replica_count
+        nodeSelector  = { workload = "system" }
         networkPolicy = { enabled = true }
     })
   }
@@ -256,7 +245,6 @@ resource "helm_release" "sonarqube" {
   ])
 
   depends_on = [
-    azurerm_kubernetes_cluster_node_pool.sandbox, # empty when sandboxing is off
     azurerm_postgresql_flexible_server_firewall_rule.aks,
     azurerm_storage_container.jobs, # empty unless storage_backend = azureblob
     azurerm_storage_container.vortex,

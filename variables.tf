@@ -4,7 +4,7 @@ variable "subscription_id" {
 }
 
 variable "location" {
-  description = "Azure region. Must be permitted by any allowed-locations policy, have Total Regional vCPU headroom, and offer a Gen2 nested-virtualization VM size."
+  description = "Azure region. Must be permitted by any allowed-locations policy and have Total Regional vCPU headroom."
   type        = string
   default     = "westeurope"
 }
@@ -32,14 +32,13 @@ variable "kubernetes_version" {
 }
 
 variable "sonarqube_chart_version" {
-  description = "SonarQube Helm chart version. REQUIRED, no default. Agentic support needs 2026.5.1000 or later; see README 'Release status'."
+  description = "SonarQube Helm chart version. REQUIRED, no default. Agentic support needs 2026.5.1000 or later; see README 'Prerequisites'."
   type        = string
 }
 
-# The chart composes the Server image tag from Chart.AppVersion when `edition` is set
-# and this is empty. On chart 2026.5.1000 the appVersion is still 2026.4.0, so leaving
-# this empty SILENTLY DEPLOYS 2026.4. Set it explicitly until `helm show chart` reports
-# a 2026.5 appVersion. Example: "2026.5.0-enterprise".
+# The chart composes the Server image tag from Chart.AppVersion when `edition` is set and this
+# is empty. Chart 2026.5.1000 reports appVersion 2026.5.0, so empty yields
+# sonarqube:2026.5.0-enterprise. Set it only to override, e.g. "2026.5.0-enterprise".
 variable "sonarqube_image_tag" {
   type    = string
   default = ""
@@ -51,18 +50,14 @@ variable "enable_agentic" {
   default     = false
 }
 
+# With enable_agentic = true this pool runs the agent runtimes too. Chart requests total roughly
+# 3.8 vCPU and 20.6Gi of memory, so a 4 vCPU / 16Gi size leaves the runtimes Pending.
 variable "system_vm_size" {
   type    = string
-  default = "Standard_D4s_v5"
+  default = "Standard_D8s_v5"
 }
 
-variable "sandbox_vm_size" {
-  description = "Must be a generation 2 size supporting nested virtualization."
-  type        = string
-  default     = "Standard_D8s_v5"
-}
-
-variable "sandbox_max_nodes" {
+variable "system_node_count" {
   type    = number
   default = 2
 }
@@ -95,8 +90,8 @@ variable "db_username" {
   default = "sonarqube"
 }
 
-# Each replica handles one job at a time, so this is your concurrency. Fixed replicas keep the
-# sandbox pool provisioned; see README "Known limitations".
+# Each replica handles one job at a time, so this is your concurrency. Replicas are fixed; see
+# README "Notes".
 variable "runtime_replica_count" {
   type    = number
   default = 1
@@ -106,10 +101,9 @@ variable "runtime_replica_count" {
 #
 #   azureblob  - Azure Blob Storage via the AZURE provider. The runtime is handed native SAS
 #                presigned URLs scoped to one object and one verb, expiring after the presign
-#                TTL, and mounts nothing. Stronger isolation for an untrusted runtime, and it
-#                avoids the Pod Sandboxing volume question entirely. Authentication is
-#                connection-string only - there is no Managed Identity path - so a storage
-#                account key is held in a Kubernetes secret.
+#                TTL, and mounts nothing. Stronger isolation for an untrusted runtime.
+#                Authentication is connection-string only - there is no Managed Identity path -
+#                so a storage account key is held in a Kubernetes secret.
 #
 #   azurefiles - Azure Files over ReadWriteMany via the FILESYSTEM provider. The runtime is
 #                handed a file:// path and mounts the share, so isolation rests on mount scoping
@@ -121,9 +115,7 @@ variable "runtime_replica_count" {
 # storage at all, so there is no share, no StorageClass and no mount-permission tuning.
 #
 # azurefiles remains supported and is the fallback where policy forbids blob endpoints. It
-# hands the runtimes file:// paths, which makes mount permissions the isolation boundary,
-# and its interaction with Kata sandboxing (virtiofs) is not covered by this module's
-# testing. Setting it requires storage_account_name.
+# hands the runtimes file:// paths, which makes mount permissions the isolation boundary.
 variable "storage_backend" {
   type    = string
   default = "azureblob"
@@ -151,29 +143,6 @@ variable "vortex_storage_size" {
   description = "Azure Files share for Vortex analyzer context. Considerably larger per project than job artifacts."
   type        = string
   default     = "100Gi"
-}
-
-# No default on purpose. The name is a property of your cluster, and a wrong value fails at pod
-# start with an unsupported-handler error rather than at plan time.
-#
-# Expected value on current AKS: "kata-vm-isolation" — what Microsoft documents and what this
-# module was validated against on Kubernetes 1.35 and 1.36. Older clusters may expose
-# "kata-mshv-vm-isolation" instead. Read it off the cluster and use it verbatim:
-#   kubectl get runtimeclass
-# Pod Sandboxing runs each runtime pod in a VM with its own guest kernel. SonarQube's
-# documentation describes it as the control that keeps LLM-influenced code away from the host, so
-# it defaults on. The chart supports turning it off — no validation requires a sandbox — and doing
-# so removes the Azure Linux pool, the Gen2 nested-virtualization SKU, the feature registration and
-# the RuntimeClass discovery. Without it, isolation rests on standard container controls only.
-variable "enable_pod_sandboxing" {
-  type    = bool
-  default = true
-}
-
-variable "sandbox_runtime_class" {
-  description = "RuntimeClass to schedule the agent runtimes onto. Required when enable_agentic AND enable_pod_sandboxing are true. Discover with `kubectl get runtimeclass`; do not guess."
-  type        = string
-  default     = ""
 }
 
 variable "llm_allowed_domains" {
