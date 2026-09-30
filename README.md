@@ -21,7 +21,7 @@ without the new, agentic capabilities.
 | AKS cluster | Kubernetes Service | Runs SonarQube Server and the agentic workloads |
 | System node pool | Virtual Machine Scale Sets | All workloads: Server, Orchestrator, Vortex, egress proxy, both agent runtimes |
 | PostgreSQL | Database for PostgreSQL Flexible Server | SonarQube database, shared with the Orchestrator |
-| Blob storage account | Storage account, two containers | Agent job artifacts and Vortex analyzer context (default backend) |
+| Blob storage account | Storage account, two containers | Agent job artifacts and Vortex analyzer context |
 | SonarQube release | Helm | The official chart from the SonarSource repository |
 
 ## Prerequisites
@@ -93,7 +93,7 @@ shell history.
 | --- | --- | --- |
 | `subscription_id` | *(required)* | Azure subscription to deploy into |
 | `sonarqube_chart_version` | *(required)* | An exact published version, `2026.5.1000` or later |
-| `storage_account_name` | `""` | Required with `azureblob`. Globally unique, 3–24 lowercase alphanumerics |
+| `storage_account_name` | `""` | Required. Globally unique, 3–24 lowercase alphanumerics |
 | `location` | `westeurope` | Must satisfy allowed-locations policy and vCPU quota |
 | `resource_group_name` | `sonarqube-2026-5` | |
 | `cluster_name` | `sonarqube-aks` | |
@@ -107,10 +107,7 @@ shell history.
 | `runtime_replica_count` | `1` | Concurrent jobs per runtime |
 | `agentic_images` | all blank | Optional overrides. Blank takes the chart default; set when mirroring to a private registry |
 | `llm_allowed_domains` | `["api.anthropic.com"]` | Egress proxy allowlist |
-| `storage_backend` | `azureblob` | `azureblob` for presigned SAS locators, `azurefiles` for a mounted share |
-| `jobs_storage_size` / `vortex_storage_size` | `100Gi` | `azurefiles` only |
-| `share_dir_mode` / `share_file_mode` | `0777` | `azurefiles` only. Reference setting; see Notes |
-| `share_gid` | `0` | Set with `0770` modes for least privilege |
+| `storage_backend` | `azureblob` | Azure Blob Storage: the runtime is handed presigned SAS locators |
 | `enable_settings_encryption` | `false` | Turn on for the second apply |
 | `tags` | `{}` | Applied to every Azure resource |
 
@@ -122,7 +119,7 @@ shell history.
 | `variables.tf` | All inputs, documented in place |
 | `aks.tf` | Resource group, AKS cluster, system node pool |
 | `postgresql.tf` | Flexible Server, database, firewall rule |
-| `storage.tf` | Namespace, blob containers, or the Azure Files StorageClass and shares |
+| `storage.tf` | Namespace, storage account and the two blob containers |
 | `secrets.tf` | Database, monitoring and agentic signing secrets |
 | `sonarqube.tf` | The Helm release and its values overlay |
 | `sonarqube-values.yaml` | Static base values; everything environment-specific is overlaid by `sonarqube.tf` |
@@ -139,18 +136,11 @@ shell history.
   six workloads, whose chart requests total roughly 3.8 vCPU and 20.5Gi of memory. The Hunter
   Agent alone requests 8Gi and Vortex 6Gi, so a 16Gi node cannot hold either alongside the Server.
   Drop to a smaller size only with `enable_agentic = false`.
-- **Two storage backends, selected by `storage_backend`.** `azureblob` (default) hands the runtime
-  a presigned SAS URL scoped to one object and one verb, expiring after the presign TTL, and
-  mounts nothing — the stronger isolation model, and the path validated end to end. `azurefiles`
-  hands it a `file://` path on a ReadWriteMany share, which makes mount permissions the isolation
-  boundary. Blob requires `<account>.blob.core.windows.net` in the egress allowlist; Azure Files
-  needs nothing there.
-- **On `azurefiles` the custom StorageClass is load-bearing.** AKS's built-in `azurefile-csi` sets
-  no `uid`, `gid` or `file_mode`, so an SMB mount lands root-owned and the agentic containers
-  (uid 900, 1000, 10001) cannot write to it. The shares still bind and the pods still start; jobs
-  fail later, on write. The `0777` default is a lab setting — for anything beyond evaluation set
-  `share_gid` to a gid the pods carry, drop the modes to `0770`, add a matching pod `fsGroup`, and
-  retest the write.
+- **Storage is Azure Blob.** The runtime is handed a presigned SAS URL scoped to one object and
+  one verb, expiring after the presign TTL, and mounts nothing — the runtimes act on locators and
+  receive no storage configuration. Job artifacts and Vortex analyzer context sit in separate
+  containers because their retention lifecycles are opposite. `<account>.blob.core.windows.net`
+  must be in the egress allowlist; the module adds it automatically.
 - **SonarQube Server cannot take the blob connection string from an environment variable.** The
   object-store library reads `azure.connection-string`, hyphenated; the Server maps `SONAR_X_Y` to
   `sonar.x.y` and can never emit the hyphen, so the value silently never binds and the Server
@@ -200,7 +190,7 @@ so its pod name gains a random suffix. Address it by label selector, not by a li
 terraform destroy
 ```
 
-This removes PostgreSQL, the blob containers or file shares, and all retained analysis, context
-and artifact data. Back up what you need first, confirm retention requirements, and rotate or
-revoke the LLM and DevOps credentials you issued. If a provider resolution error appears after the
-cluster was removed out of band, destroy `helm_release.sonarqube` first.
+This removes PostgreSQL, the blob containers, and all retained analysis, context and artifact
+data. Back up what you need first, confirm retention requirements, and rotate or revoke the LLM
+and DevOps credentials you issued. If a provider resolution error appears after the cluster was
+removed out of band, destroy `helm_release.sonarqube` first.
