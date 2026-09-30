@@ -11,7 +11,7 @@ agentic components, including private networking, Application Gateway and automa
 [sonarqube-server-azure-aks-installation](https://github.com/sonar-solutions/sonarqube-server-azure-aks-installation).
 
 `enable_agentic` defaults to `false`. With it off this deploys SonarQube Server Enterprise on AKS
-and nothing else, which is complete and useful on its own.
+without the new, agentic capabilities.
 
 ## What it creates
 
@@ -26,9 +26,10 @@ and nothing else, which is complete and useful on its own.
 
 ## Prerequisites
 
-- Terraform >= 1.7, Azure CLI >= 2.80.0, `kubectl`, Helm 3.
-- An Enterprise or Data Center Edition licence, plus entitlement for each agentic capability you
-  enable. Edition licensing alone does not enable them.
+- Terraform installed and operational.
+- An Enterprise Edition licence, plus entitlement for each agentic capability you
+  enable (Enterprise Edition licensing alone does not enable them).
+- SonarQube Server must be using the new license management and not Server ID based licensing.
 - A region permitted by any allowed-locations Azure Policy, with Total Regional vCPU headroom for
   the system pool, and any resource tags your subscription policy mandates via `tags`. A tag or
   location policy denies the very first resource.
@@ -40,7 +41,7 @@ and nothing else, which is complete and useful on its own.
   `helm repo update && helm search repo sonarqube/sonarqube --versions`. Run `helm repo update`
   first or a cached index reports the old version.
 
-This module deploys the agent runtimes with the standard supported Kubernetes configuration. It
+This module deploys the agent runtimes with the standard, supported Kubernetes configuration. It
 does not configure alternative runtime sandboxing technologies. Organizations with
 platform-mandated workload-isolation controls should validate those controls independently against
 their AKS environment and the released SonarQube chart.
@@ -60,19 +61,19 @@ terraform plan
 terraform apply
 ```
 
-None of the `.tf` files need editing. All configuration lives in `terraform.tfvars.json`.
+None of the `.tf` files need editing and all configuration resides in `terraform.tfvars.json`.
 
 ```sh
 $(terraform output -raw get_credentials_command)
 $(terraform output -raw port_forward_command)
 ```
 
-SonarQube is then at `http://127.0.0.1:9000`. Apply your licence under **Administration →
-Configuration → License manager** and change the admin password.
+SonarQube is then accessible at `http://127.0.0.1:9000`. Apply your license under **Administration →
+Configuration → License manager** and change the admin password when prompted.
 
 Port-forward is enough for administration but **not** for validating the agentic capabilities: CI
 scanners must reach the deployed URL to upload analyzer context. Add ingress and TLS before
-testing Vortex, Hunter or Remediation.
+testing Vortex, Hunter Agent or Remediation Agent.
 
 ### Settings encryption
 
@@ -86,7 +87,7 @@ This key encrypts stored LLM provider credentials and is mounted into the Orches
 before enabling the agentic capabilities. Use a file, not `--from-literal`, to keep the key out of
 shell history.
 
-## Inputs
+## Configuration inputs (with example values)
 
 | Variable | Default | Description |
 | --- | --- | --- |
@@ -113,7 +114,7 @@ shell history.
 | `enable_settings_encryption` | `false` | Turn on for the second apply |
 | `tags` | `{}` | Applied to every Azure resource |
 
-## Files
+## Configuration files
 
 | File | Contents |
 | --- | --- |
@@ -171,11 +172,11 @@ shell history.
 
 **Upgrading with the agentic components enabled needs a manual step inside the apply window.**
 SonarQube does not migrate its own schema. After the Helm upgrade the Server restarts into
-`DB_MIGRATION_NEEDED` and serves nothing useful, yet its readiness probe still passes, so
+`DB_MIGRATION_NEEDED`, yet its readiness probe still passes, so
 Kubernetes and Helm both report the pod healthy. Vortex health-checks against the Server, stays
 un-ready, and `helm upgrade` blocks until it times out.
 
-Sequence it rather than doing it in one shot. Back up the database first.
+Sequence it rather than doing it in one shot, and back up the database first.
 
 ```sh
 # 1. Upgrade the Server alone: set enable_agentic = false, then
