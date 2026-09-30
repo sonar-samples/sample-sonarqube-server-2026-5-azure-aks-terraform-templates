@@ -24,17 +24,13 @@ without the new, agentic capabilities.
 
 ## Prerequisites
 
-- Terraform installed and operational.
+- Terraform and Azure CLI installed and operational.
 - An Enterprise Edition licence, plus entitlement for each agentic capability you
   enable (Enterprise Edition licensing alone does not enable them).
 - SonarQube Server must be using the new license management and not Server ID based licensing.
 - A region permitted by any allowed-locations Azure Policy, with Total Regional vCPU headroom for
   the system pool, and any resource tags your subscription policy mandates via `tags`. A tag or
   location policy denies the very first resource.
-- **`az login` may not be sufficient.** The azurerm provider needs a Microsoft Graph-scoped token,
-  and a Conditional Access policy can refuse it while ordinary `az` commands keep working — the
-  error points at `provider "azurerm"` and gives no hint of the cause. Confirm with
-  `az account get-access-token --scope https://graph.microsoft.com/.default`.
 - Pin an exact published chart version. Agentic support needs `2026.5.1000` or later:
   `helm repo update && helm search repo sonarqube/sonarqube --versions`. Run `helm repo update`
   first or a cached index reports the old version.
