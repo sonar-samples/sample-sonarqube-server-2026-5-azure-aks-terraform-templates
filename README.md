@@ -1,12 +1,10 @@
-# SonarQube Server 2026.5 Enterprise Edition + agentic components on Azure AKS
+# SonarQube Server 2026.5 Enterprise Edition with agentic components — Azure AKS
 
-Terraform templates for SonarQube Server 2026.5 Enterprise Edition on Azure Kubernetes Service (AKS), optionally with the
+Terraform templates for SonarQube Server 2026.5 Enterprise Edition with on Azure Kubernetes Service (AKS), optionally with the
 2026.5 agentic components: Sonar Vortex analysis, the Agent Orchestrator, the SonarQube Hunter
 Agent, and the SonarQube Remediation Agent.
 
-This repo is the templates only. The walkthrough — licensing, entitlement, LLM provider
-registration, ingress and verification — lives in the blueprint *Installing SonarQube Server
-2026.5 Enterprise and its agentic components on Azure AKS*. For SonarQube Server without the
+This repo contains only the Terraform templates. For SonarQube Server without the
 agentic components, including private networking, Application Gateway and automated TLS, see
 [sonarqube-server-azure-aks-installation](https://github.com/sonar-solutions/sonarqube-server-azure-aks-installation).
 
@@ -129,7 +127,7 @@ shell history.
 ## Notes
 
 - **`gvisor.enabled` is set to `false` deliberately.** The chart defaults it to `true`, which
-  deploys a privileged installer DaemonSet that rewrites containerd configuration — unsupported on
+  deploys a privileged installer DaemonSet that rewrites containerd configuration, which is unsupported on
   AKS managed nodes. Turning it off is what gives the runtimes the standard Kubernetes
   configuration. `agentRuntimeSandbox` is left at its chart default, disabled.
 - **The system pool is sized for the agentic path.** With `enable_agentic = true` it carries all
