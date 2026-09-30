@@ -25,6 +25,114 @@ variable "postgres_name" {
   default     = "sonarqube-pg"
 }
 
+variable "postgres_sku" {
+  type    = string
+  default = "GP_Standard_D4ds_v5"
+}
+
+variable "postgres_storage_mb" {
+  type    = number
+  default = 131072
+}
+
+variable "postgres_backup_retention_days" {
+  type    = number
+  default = 7
+}
+
+variable "postgres_high_availability" {
+  description = "Zone-redundant HA. Set false in a region without availability zones."
+  type        = bool
+  default     = true
+}
+
+# --------------------------------------------------------------------------
+# Networking. None of these ranges may overlap each other or any network you peer with.
+# --------------------------------------------------------------------------
+
+variable "vnet_cidr" {
+  type    = string
+  default = "10.0.0.0/16"
+}
+
+variable "aks_subnet_cidr" {
+  description = "Node addresses only; pods use pod_cidr."
+  type        = string
+  default     = "10.0.1.0/24"
+}
+
+variable "appgw_subnet_cidr" {
+  description = "Dedicated to Application Gateway v2."
+  type        = string
+  default     = "10.0.2.0/24"
+}
+
+variable "postgresql_subnet_cidr" {
+  description = "Delegated to PostgreSQL Flexible Server. /28 minimum."
+  type        = string
+  default     = "10.0.3.0/28"
+}
+
+variable "private_subnet_cidr" {
+  description = "SonarQube internal load balancer and the blob private endpoint."
+  type        = string
+  default     = "10.0.4.0/24"
+}
+
+variable "pod_cidr" {
+  description = "Overlay pod range. Must not overlap vnet_cidr."
+  type        = string
+  default     = "10.244.0.0/16"
+}
+
+variable "service_cidr" {
+  description = "Kubernetes Service range. Must not overlap vnet_cidr or pod_cidr. The DNS service takes the .10 address."
+  type        = string
+  default     = "10.2.0.0/16"
+}
+
+variable "appgw_capacity" {
+  description = "Application Gateway instance count."
+  type        = number
+  default     = 2
+}
+
+# --------------------------------------------------------------------------
+# DNS and TLS
+# --------------------------------------------------------------------------
+
+variable "domain_name" {
+  description = "An existing Azure DNS zone, e.g. example.com."
+  type        = string
+}
+
+variable "dns_resource_group_name" {
+  description = "Resource group holding the Azure DNS zone."
+  type        = string
+}
+
+variable "host_name" {
+  description = "SonarQube Server is served at https://<host_name>.<domain_name>."
+  type        = string
+  default     = "sonarqube"
+}
+
+variable "acme_email" {
+  description = "ACME account email. Let's Encrypt sends expiry notices here."
+  type        = string
+}
+
+variable "acme_server_url" {
+  description = "ACME directory. Use https://acme-staging-v02.api.letsencrypt.org/directory while testing to avoid production rate limits."
+  type        = string
+  default     = "https://acme-v02.api.letsencrypt.org/directory"
+}
+
+variable "log_retention_days" {
+  type    = number
+  default = 30
+}
+
 variable "kubernetes_version" {
   description = "Leave null to take the region's latest non-preview version. A pinned minor eventually becomes long-term-support-only and is then rejected at create time."
   type        = string
@@ -50,14 +158,36 @@ variable "enable_agentic" {
   default     = false
 }
 
-# With enable_agentic = true this pool runs the agent runtimes too. Chart requests total roughly
-# 3.8 vCPU and 20.6Gi of memory, so a 4 vCPU / 16Gi size leaves the runtimes Pending.
+# --------------------------------------------------------------------------
+# Node pools
+# --------------------------------------------------------------------------
+
+# Kubernetes add-ons only (CriticalAddonsOnly).
 variable "system_vm_size" {
+  type    = string
+  default = "Standard_D4s_v5"
+}
+
+variable "system_node_count" {
+  type    = number
+  default = 2
+}
+
+# SonarQube Server Enterprise Edition runs as a single replica, so this pool has one node.
+variable "sonarqube_vm_size" {
+  type    = string
+  default = "Standard_D8ds_v5"
+}
+
+# Created only with enable_agentic = true. Chart requests total roughly 3.3 vCPU and 16.5Gi at
+# one runtime replica each; the Hunter Agent alone requests 8Gi, so a 16Gi size leaves it Pending.
+# Add capacity alongside runtime_replica_count.
+variable "agentic_vm_size" {
   type    = string
   default = "Standard_D8s_v5"
 }
 
-variable "system_node_count" {
+variable "agentic_node_count" {
   type    = number
   default = 2
 }
@@ -130,6 +260,12 @@ variable "storage_backend" {
 variable "storage_account_name" {
   type    = string
   default = ""
+}
+
+variable "storage_replication_type" {
+  description = "Blob account replication. ZRS survives a zone outage where the region offers it."
+  type        = string
+  default     = "ZRS"
 }
 
 # Only used when storage_backend is azurefiles.

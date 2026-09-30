@@ -1,3 +1,22 @@
+output "sonarqube_url" {
+  description = "Public HTTPS address of SonarQube Server. Point CI scanners and agent clients here."
+  value       = local.sonarqube_url
+}
+
+output "appgw_public_ip" {
+  value = azurerm_public_ip.appgw.ip_address
+}
+
+output "sonarqube_internal_ip" {
+  description = "Internal load balancer address. The Application Gateway's only backend."
+  value       = local.sonarqube_internal_ip
+}
+
+output "certificate_not_after" {
+  description = "Certificate expiry. Re-issued on the first plan or apply within 30 days of this date."
+  value       = acme_certificate.sonarqube.certificate_not_after
+}
+
 output "resource_group_name" {
   value = azurerm_resource_group.this.name
 }
@@ -11,12 +30,8 @@ output "kubernetes_version" {
 }
 
 output "postgres_fqdn" {
-  value = azurerm_postgresql_flexible_server.this.fqdn
-}
-
-output "aks_egress_ip" {
-  description = "Address allowed through the PostgreSQL firewall."
-  value       = data.azurerm_public_ip.aks_egress.ip_address
+  description = "Resolves only inside the VNet."
+  value       = azurerm_postgresql_flexible_server.this.fqdn
 }
 
 output "sonarqube_status" {
@@ -28,7 +43,8 @@ output "get_credentials_command" {
 }
 
 output "port_forward_command" {
-  value = "kubectl port-forward -n ${local.ns} svc/sonarqube-sonarqube 9000:9000"
+  description = "Troubleshooting fallback when the gateway backend is unhealthy."
+  value       = "kubectl port-forward -n ${local.ns} svc/sonarqube-sonarqube 9000:9000"
 }
 
 output "storage_backend" {
@@ -37,6 +53,6 @@ output "storage_backend" {
 }
 
 output "blob_endpoint" {
-  description = "Storage host the runtimes reach through the egress proxy. Empty on the filesystem backend."
+  description = "Storage host the runtimes reach through the egress proxy, over the private endpoint. Empty on the filesystem backend."
   value       = local.blob_host
 }

@@ -3,44 +3,69 @@ resource "random_password" "postgres" {
   special = false
 }
 
+# --------------------------------------------------------------------------
+# Private DNS for VNet-integrated Flexible Server. The zone name must end in
+# .postgres.database.azure.com.
+# --------------------------------------------------------------------------
+
+resource "azurerm_private_dns_zone" "postgresql" {
+  name                = "${var.postgres_name}.private.postgres.database.azure.com"
+  resource_group_name = azurerm_resource_group.this.name
+  tags                = var.tags
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "postgresql" {
+  name                 = "postgresql"
+  private_dns_zone_id  = azurerm_private_dns_zone.postgresql.id
+  virtual_network_id   = azurerm_virtual_network.this.id
+  registration_enabled = false
+  tags                 = var.tags
+}
+
+# --------------------------------------------------------------------------
+# PostgreSQL Flexible Server: delegated subnet, no public endpoint, zone-redundant HA.
+# Shared by SonarQube Server and the Agent Orchestrator.
+# --------------------------------------------------------------------------
+
 resource "azurerm_postgresql_flexible_server" "this" {
-  name                   = var.postgres_name
-  resource_group_name    = azurerm_resource_group.this.name
-  location               = var.location
-  version                = "16"
-  sku_name               = "GP_Standard_D2ds_v5"
-  storage_mb             = 32768
-  administrator_login    = "sonarqube"
-  administrator_password = random_password.postgres.result
-  # REFERENCE SETTING. A public endpoint narrowed to the cluster's outbound IP keeps this module
-  # self-contained, but it is not a production baseline. For production use a delegated subnet
-  # with private access, a private DNS zone, and no public endpoint.
-  public_network_access_enabled = true
+  name                          = var.postgres_name
+  resource_group_name           = azurerm_resource_group.this.name
+  location                      = var.location
+  version                       = "16"
+  sku_name                      = var.postgres_sku
+  storage_mb                    = var.postgres_storage_mb
+  auto_grow_enabled             = true
+  backup_retention_days         = var.postgres_backup_retention_days
+  administrator_login           = var.db_username
+  administrator_password        = random_password.postgres.result
+  public_network_access_enabled = false
+  delegated_subnet_id           = azurerm_subnet.postgresql.id
+  private_dns_zone_id           = azurerm_private_dns_zone.postgresql.id
+  zone                          = "1"
   tags                          = var.tags
 
-  lifecycle {
-    ignore_changes = [zone]
+  # Zone-redundant HA needs a region with availability zones. Set
+  # postgres_high_availability = false where the region has none.
+  dynamic "high_availability" {
+    for_each = var.postgres_high_availability ? [1] : []
+    content {
+      mode                      = "ZoneRedundant"
+      standby_availability_zone = "2"
+    }
   }
+
+  # A failover swaps the primary and standby zones. Ignoring both keeps the next plan from
+  # trying to swap them back.
+  lifecycle {
+    ignore_changes = [zone, high_availability[0].standby_availability_zone]
+  }
+
+  depends_on = [azurerm_private_dns_zone_virtual_network_link.postgresql]
 }
 
 resource "azurerm_postgresql_flexible_server_database" "sonarqube" {
   name      = "sonarqube"
   server_id = azurerm_postgresql_flexible_server.this.id
-}
-
-# Open the firewall to the cluster's outbound address and nothing else.
-locals {
-  egress_ip_id = tolist(azurerm_kubernetes_cluster.this.network_profile[0].load_balancer_profile[0].effective_outbound_ips)[0]
-}
-
-data "azurerm_public_ip" "aks_egress" {
-  name                = reverse(split("/", local.egress_ip_id))[0]
-  resource_group_name = azurerm_kubernetes_cluster.this.node_resource_group
-}
-
-resource "azurerm_postgresql_flexible_server_firewall_rule" "aks" {
-  name             = "aks-egress"
-  server_id        = azurerm_postgresql_flexible_server.this.id
-  start_ip_address = data.azurerm_public_ip.aks_egress.ip_address
-  end_ip_address   = data.azurerm_public_ip.aks_egress.ip_address
+  charset   = "UTF8"
+  collation = "en_US.utf8"
 }

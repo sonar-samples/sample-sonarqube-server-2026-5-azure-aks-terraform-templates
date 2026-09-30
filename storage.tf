@@ -40,9 +40,18 @@ resource "azurerm_storage_account" "agentic" {
   resource_group_name      = azurerm_resource_group.this.name
   location                 = var.location
   account_tier             = "Standard"
-  account_replication_type = "LRS"
+  account_replication_type = var.storage_replication_type
   min_tls_version          = "TLS1_2"
   tags                     = var.tags
+
+  # Reachable only through the private endpoint below.
+  public_network_access           = "Disabled"
+  allow_nested_items_to_be_public = false
+
+  # Must stay enabled. The object-store library authenticates to Azure by connection string only
+  # and signs its SAS locators with the account key. An Azure Policy that forces shared key
+  # access off breaks every agentic storage call.
+  shared_access_key_enabled = true
 
   # Caught at plan time. Without this the empty name reaches the Azure API and fails
   # late with an opaque naming error, after the cluster has already been built.
@@ -51,6 +60,51 @@ resource "azurerm_storage_account" "agentic" {
       condition     = var.storage_account_name != ""
       error_message = "storage_account_name is required when storage_backend is azureblob. Use 3-24 lowercase alphanumerics, globally unique across Azure."
     }
+  }
+}
+
+# Private endpoint and private DNS. The account hostname stays <account>.blob.core.windows.net;
+# inside the VNet it resolves through privatelink.blob.core.windows.net to a private address.
+# The egress proxy therefore still matches the runtimes' SAS requests by hostname, and its
+# NetworkPolicy must keep private ranges reachable: do NOT add RFC1918 CIDRs to
+# agentEgressProxy.networkPolicy.egressExcludeCidrs.
+resource "azurerm_private_dns_zone" "blob" {
+  count = local.use_blob ? 1 : 0
+
+  name                = "privatelink.blob.core.windows.net"
+  resource_group_name = azurerm_resource_group.this.name
+  tags                = var.tags
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "blob" {
+  count = local.use_blob ? 1 : 0
+
+  name                 = "blob"
+  private_dns_zone_id  = azurerm_private_dns_zone.blob[0].id
+  virtual_network_id   = azurerm_virtual_network.this.id
+  registration_enabled = false
+  tags                 = var.tags
+}
+
+resource "azurerm_private_endpoint" "blob" {
+  count = local.use_blob ? 1 : 0
+
+  name                = "${var.storage_account_name}-blob"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.this.name
+  subnet_id           = azurerm_subnet.private.id
+  tags                = var.tags
+
+  private_service_connection {
+    name                           = "blob"
+    private_connection_resource_id = azurerm_storage_account.agentic[0].id
+    subresource_names              = ["blob"]
+    is_manual_connection           = false
+  }
+
+  private_dns_zone_group {
+    name                 = "blob"
+    private_dns_zone_ids = [azurerm_private_dns_zone.blob[0].id]
   }
 }
 
@@ -128,8 +182,11 @@ resource "kubernetes_storage_class_v1" "agentic_files" {
   reclaim_policy         = "Delete"
   allow_volume_expansion = true
 
+  # networkEndpointType has the CSI driver create each share's storage account with a private
+  # endpoint in the cluster VNet instead of a public one.
   parameters = {
-    skuName = "Standard_LRS"
+    skuName             = "Standard_LRS"
+    networkEndpointType = "privateEndpoint"
   }
 
   mount_options = [
