@@ -58,6 +58,7 @@ variables {
   sonarqube_exposure         = "internal"
   postgres_high_availability = true
   enable_settings_encryption = false
+  agentic_paused             = false
 }
 
 run "default_server_only" {
@@ -173,5 +174,27 @@ run "internal_exposure_default" {
   assert {
     condition     = length(azurerm_role_assignment.aks_network) == 1 && length(azurerm_public_ip.sonarqube_svc) == 0
     error_message = "internal exposure must create the role assignment and no public IP for the Server."
+  }
+}
+
+run "agentic_paused_keeps_infrastructure" {
+  command = plan
+  variables {
+    enable_agentic = true
+    agentic_paused = true
+  }
+
+  assert {
+    condition = (
+      length(azurerm_storage_account.agentic) == 1 &&
+      length(azurerm_private_endpoint.blob) == 1 &&
+      length(azurerm_kubernetes_cluster_node_pool.agentic) == 1 &&
+      length(kubernetes_secret_v1.agentic_instance) == 1
+    )
+    error_message = "agentic_paused must keep the agentic pool, storage and secrets."
+  }
+  assert {
+    condition     = local.agentic_in_helm == false
+    error_message = "agentic_paused must drop the agentic components from the Helm release."
   }
 }

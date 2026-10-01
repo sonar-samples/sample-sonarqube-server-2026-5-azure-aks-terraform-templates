@@ -23,7 +23,7 @@ Application Gateway, without the agentic capabilities.
 | `agentic` node pool | 2× `Standard_D8s_v5`, tainted, `enable_agentic = true` only | Vortex, Orchestrator, egress proxy, key-derivation hook, both agent runtimes |
 | PostgreSQL | Flexible Server 16, delegated subnet, private DNS, zone-redundant HA | SonarQube database, shared with the Orchestrator |
 | Blob storage | Storage account with a private endpoint, two containers | Agent job artifacts and Vortex analyzer context |
-| Internal load balancer | AKS-managed, fixed address in `private` | Application Gateway's backend for SonarQube Server |
+| Server load balancer | AKS-managed. `internal`: fixed address in `private`. `gateway-restricted`: public IP in the node resource group that admits only the gateway | Application Gateway's only backend |
 | Application Gateway | Standard_v2 | HTTPS on 443, HTTP-to-HTTPS redirect on 80 |
 | TLS certificate | Let's Encrypt via ACME DNS-01 | Issued on apply, re-issued on apply inside the 30-day window |
 | DNS record | A record in your existing Azure DNS zone | `<host_name>.<domain_name>` |
@@ -47,6 +47,8 @@ Application Gateway, without the agentic capabilities.
   PostgreSQL HA) and vCPU headroom for all three pools, plus any tags your policy mandates.
   AKS creates its own node resource group (`MC_…`) in the cluster's region, so a policy that
   restricts *resource group* locations applies too, even when `create_resource_group = false`.
+  Check the subscription's per-region AKS cluster quota as well (`az aks list` counts what is
+  already used).
 - **`az login` may not be sufficient.** The azurerm provider needs a Microsoft Graph-scoped token,
   and a Conditional Access policy can refuse it while ordinary `az` commands keep working.
   Confirm with `az account get-access-token --scope https://graph.microsoft.com/.default`.
@@ -74,7 +76,10 @@ terraform apply
 ```
 
 None of the `.tf` files need editing and all configuration resides in `terraform.tfvars.json`.
-Use the Let's Encrypt staging directory (`acme_server_url`) for trial runs to avoid rate limits.
+Use the Let's Encrypt staging directory (`acme_server_url`) for trial runs to avoid rate limits:
+production allows only a handful of certificates per week for the same hostname, and every
+destroy-and-reapply issues a new one. Application Gateway is the slowest resource; allow up to an
+hour for it.
 
 SonarQube is then served at `terraform output -raw sonarqube_url`. Apply your license under
 **Administration → Configuration → License manager** and change the admin password when prompted.
@@ -116,7 +121,8 @@ shell history.
 | `system_vm_size` / `system_node_count` | `Standard_D4s_v5` / `2` | Add-ons only |
 | `sonarqube_vm_size` | `Standard_D8ds_v5` | SonarQube Server, one node |
 | `agentic_vm_size` / `agentic_node_count` | `Standard_D8s_v5` / `2` | Agentic pool |
-| `enable_agentic` | `false` | Deploys Vortex, the Orchestrator and both agent runtimes |
+| `enable_agentic` | `false` | Deploys Vortex, the Orchestrator and both agent runtimes, plus their node pool, storage and secrets. Setting it back to `false` destroys all of that, including stored data |
+| `agentic_paused` | `false` | Upgrade switch: removes the agentic components from the Helm release but keeps their node pool, storage and data. See Upgrade |
 | `runtime_replica_count` | `1` | Concurrent jobs per runtime |
 | `agentic_images` | all blank | Optional overrides; set when mirroring to a private registry |
 | `llm_allowed_domains` | `["api.anthropic.com"]` | Egress proxy allowlist. The blob host is added automatically |
@@ -146,10 +152,12 @@ shell history.
 
 ## Notes
 
-- **Only SonarQube Server has an external route.** The agentic API is served in-process by the
-  Server, so the Orchestrator, Vortex, the egress proxy and both runtimes stay `ClusterIP`.
-  Application Gateway forwards to the Server's internal load balancer; nothing listens on a
-  public address except the gateway.
+- **Only SonarQube Server is reachable from outside the cluster.** The agentic API is served
+  in-process by the Server, so the Orchestrator, Vortex, the egress proxy and both runtimes stay
+  `ClusterIP`. With `internal` exposure nothing but the gateway has a public address. With
+  `gateway-restricted`, the Server's load balancer also has a public IP, but AKS writes an NSG rule
+  that admits only the gateway's IP, and traffic from the gateway to the Server is HTTP over that
+  address. Confirm a direct request to `sonarqube_backend_ip` on port 9000 times out.
 - **Cilium enforces the chart's NetworkPolicies.** AKS accepts NetworkPolicy objects on a cluster
   with no policy engine and enforces none of them. Before production use, verify from inside each
   runtime pod that an allowlisted host connects through the proxy (`200`), an unlisted host is
@@ -185,6 +193,24 @@ shell history.
 - **Reusing a storage account name straight after a destroy leaves stale DNS.** Pick a fresh
   `storage_account_name` per run or confirm from inside the cluster.
 
+## Validation
+
+Validated end to end on 2026-10-01 in westeurope with chart `2026.5.1001` (SonarQube Server
+`2026.5.1`, agentic images `2026.5.0`), using `sonarqube_exposure = "gateway-restricted"`:
+
+- HTTPS on the public hostname with a trusted Let's Encrypt certificate, HTTP redirected to HTTPS,
+  gateway backend healthy, and the Server's own public IP unreachable except from the gateway.
+- SonarQube Server on the `sonarqube` pool and every agentic workload on the `agentic` pool; all
+  five derived signing-key secrets present.
+- From inside the Hunter Agent and Remediation Agent pods: the LLM host and the blob host through
+  the proxy return `200` (blob over the private endpoint at a `10.0.4.x` address), an unlisted host
+  returns `403`, and a direct connection to the LLM host's IP is blocked (curl exit 28).
+- Enterprise license applied and the agentic capabilities enabled and run.
+- A repeat `terraform plan` after each apply reports no changes.
+
+The default `internal` exposure, which creates a role assignment, has not yet been validated on a
+live subscription.
+
 ## Upgrade
 
 **Upgrading with the agentic components enabled needs a manual step inside the apply window.**
@@ -196,7 +222,8 @@ un-ready, and `helm upgrade` blocks until it times out.
 Sequence it rather than doing it in one shot, and back up the database first.
 
 ```sh
-# 1. Upgrade the Server alone: set enable_agentic = false, then
+# 1. Upgrade the Server alone: set sonarqube_chart_version to the new release and
+#    agentic_paused = true, then
 terraform apply
 
 # 2. Migrate the database. Browse /setup, or:
@@ -204,12 +231,13 @@ curl -s -u <admin>:<password> -X POST https://<host_name>.<domain_name>/api/syst
 curl -s https://<host_name>.<domain_name>/api/system/db_migration_status   # wait for MIGRATION_SUCCEEDED
 curl -s https://<host_name>.<domain_name>/api/system/status                # wait for UP
 
-# 3. Re-enable the agentic components: set enable_agentic = true, then
+# 3. Re-enable the agentic components: set agentic_paused = false, then
 terraform apply
 ```
 
-`deploymentType` is deprecated and the Server becomes a `Deployment` rather than a `StatefulSet`,
-so its pod name gains a random suffix. Address it by label selector, not by a literal pod name.
+Use `agentic_paused`, never `enable_agentic = false`, for this. `enable_agentic` also controls the
+agentic node pool, storage account and secrets, so turning it off destroys them along with the
+stored analyzer context and job artifacts. `agentic_paused` changes only the Helm release.
 
 ## Cleanup
 

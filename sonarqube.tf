@@ -23,6 +23,8 @@ locals {
     local.use_blob ? [local.blob_host] : [],
   )
 
+  agentic_in_helm = var.enable_agentic && !var.agentic_paused
+
   # Every agentic workload goes to the tainted agentic pool. The chart falls back to the
   # top-level nodeSelector and tolerations (which pin SonarQube Server to its own pool) for any
   # component that leaves its own empty, so each one is set explicitly, the egress proxy and the
@@ -285,9 +287,11 @@ resource "helm_release" "sonarqube" {
       sonarSecretKey = "sonarqube-encryption-secret"
     }) : "",
 
-    var.enable_agentic ? yamlencode(local.agentic) : "",
-    local.use_blob ? yamlencode(local.storage_blob) : "",
-    local.use_files ? yamlencode(local.storage_files) : "",
+    # agentic_paused drops only these documents. The agentic node pool, storage and secrets stay,
+    # so a Server upgrade can run without the agentic workloads and without losing their data.
+    local.agentic_in_helm ? yamlencode(local.agentic) : "",
+    local.use_blob && local.agentic_in_helm ? yamlencode(local.storage_blob) : "",
+    local.use_files && local.agentic_in_helm ? yamlencode(local.storage_files) : "",
   ])
 
   depends_on = [

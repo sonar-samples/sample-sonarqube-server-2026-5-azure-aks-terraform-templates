@@ -179,8 +179,17 @@ variable "sonarqube_image_tag" {
   default = ""
 }
 
+# Upgrade switch, not an off switch. true removes the agentic components from the Helm release
+# so SonarQube Server can be upgraded and its database migrated on its own, while the agentic node
+# pool, storage account, analyzer context and job artifacts all stay. Setting enable_agentic =
+# false instead destroys that infrastructure and its data.
+variable "agentic_paused" {
+  type    = bool
+  default = false
+}
+
 variable "enable_agentic" {
-  description = "Deploy Vortex, the Agent Orchestrator and both agent runtimes. Requires a chart that ships them (2026.5.1000 or later) and an entitlement that enables them."
+  description = "Deploy Vortex, the Agent Orchestrator and both agent runtimes, with their node pool, storage and secrets. Requires a chart that ships them (2026.5.1000 or later) and an entitlement that enables them. Turning it off destroys that infrastructure and its data; use agentic_paused for upgrades."
   type        = bool
   default     = false
 }

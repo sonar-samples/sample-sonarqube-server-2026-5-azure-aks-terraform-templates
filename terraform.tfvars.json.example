@@ -18,12 +18,15 @@
   "postgresql_subnet_cidr": "10.0.3.0/28",
   "private_subnet_cidr": "10.0.4.0/24",
 
+  "sonarqube_exposure": "internal",
+
   "kubernetes_version": null,
 
-  "sonarqube_chart_version": "2026.5.1000",
+  "sonarqube_chart_version": "2026.5.1001",
   "sonarqube_image_tag": "",
 
   "enable_agentic": false,
+  "agentic_paused": false,
   "runtime_replica_count": 1,
 
   "agentic_images": {
