@@ -36,6 +36,12 @@ resource "azurerm_subnet" "postgresql" {
   virtual_network_name = azurerm_virtual_network.this.name
   address_prefixes     = [var.postgresql_subnet_cidr]
 
+  # Flexible Server adds this endpoint to its delegated subnet on its own. Declaring it keeps
+  # the next plan from trying to strip it back out.
+  service_endpoint {
+    service = "Microsoft.Storage"
+  }
+
   delegation {
     name = "postgresql"
     service_delegation {
