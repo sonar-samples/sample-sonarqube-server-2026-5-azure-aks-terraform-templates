@@ -110,7 +110,7 @@ shell history.
 | `cluster_name` | `sonarqube-aks` | |
 | `postgres_name` | `sonarqube-pg` | Globally unique across Azure; `plan` will not catch a collision |
 | `postgres_sku` | `GP_Standard_D4ds_v5` | |
-| `postgres_high_availability` | `true` | Zone-redundant HA. `false` in a region without zones |
+| `postgres_high_availability` | `true` | Zone-redundant HA. `false` where the region or subscription does not offer it (`az postgres flexible-server list-skus -l <region>`) |
 | `vnet_cidr`, `aks_subnet_cidr`, `appgw_subnet_cidr`, `postgresql_subnet_cidr`, `private_subnet_cidr` | `10.0.0.0/16`, `.1.0/24`, `.2.0/24`, `.3.0/28`, `.4.0/24` | Must not overlap each other or peered networks |
 | `pod_cidr`, `service_cidr` | `10.244.0.0/16`, `10.2.0.0/16` | Overlay ranges; must not overlap the VNet |
 | `system_vm_size` / `system_node_count` | `Standard_D4s_v5` / `2` | Add-ons only |
