@@ -20,9 +20,8 @@ This repository contains Terraform templates for deploying SonarQube Server 2026
 - [Terraform](https://developer.hashicorp.com/terraform/install)
 - [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) authenticated (`az login`)
 - A SonarQube Server Enterprise Edition license, plus entitlement for each agentic capability you enable
+- SonarQube Server must be using the [new license management](https://docs.sonarsource.com/sonarqube-server/2025.4/instance-administration/license-administration/online-license-management) and not Server ID based licensing.
 - A registered domain with an Azure DNS zone, and DNS Zone Contributor on that zone
-- Owner (or Contributor plus User Access Administrator) on the subscription, or set `sonarqube_exposure` to `gateway-restricted` (see Configuration Values)
-- Shared key access allowed on storage accounts by your Azure Policy
 
 ## Quick Start
 
