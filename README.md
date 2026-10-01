@@ -248,5 +248,13 @@ terraform destroy
 This removes PostgreSQL, the blob containers, the Application Gateway, the DNS record and all
 retained analysis, context and artifact data. The Azure DNS zone itself is not managed here and
 stays. Back up what you need first, confirm retention requirements, and rotate or revoke the LLM
-and DevOps credentials you issued. If a provider resolution error appears after the cluster was
-removed out of band, destroy `helm_release.sonarqube` first.
+and DevOps credentials you issued.
+
+If the AKS cluster was deleted outside Terraform, the destroy fails because Terraform can no
+longer reach the cluster to remove the in-cluster resources. Remove those from state, then
+destroy the rest:
+
+```sh
+terraform state list | grep -E '^(helm_release|kubernetes_)' | xargs terraform state rm
+terraform destroy
+```
