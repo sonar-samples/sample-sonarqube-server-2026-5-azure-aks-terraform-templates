@@ -23,6 +23,22 @@ locals {
     local.use_blob ? [local.blob_host] : [],
   )
 
+  agentic_in_helm = var.enable_agentic && !var.agentic_paused
+
+  # Every agentic workload goes to the tainted agentic pool. The chart falls back to the
+  # top-level nodeSelector and tolerations (which pin SonarQube Server to its own pool) for any
+  # component that leaves its own empty, so each one is set explicitly, the egress proxy and the
+  # key-derivation hook included.
+  agentic_scheduling = {
+    nodeSelector = { workload = "agentic" }
+    tolerations = [{
+      key      = "workload"
+      operator = "Equal"
+      value    = "agentic"
+      effect   = "NoSchedule"
+    }]
+  }
+
   # ---- Backend-independent agentic configuration -------------------------------------------
   agentic = {
     # An input the chart requires and does not create. A pre-install hook derives one signing
@@ -38,15 +54,15 @@ locals {
     # left at its chart default (disabled); this module configures no alternative sandbox runtime.
     gvisor = { enabled = false }
 
-    vortexAnalysis = merge(local.image_override.vortex, {
-      enabled      = true
-      nodeSelector = { workload = "system" }
+    agentKeyDerivation = local.agentic_scheduling
+
+    vortexAnalysis = merge(local.image_override.vortex, local.agentic_scheduling, {
+      enabled = true
     })
 
-    agentOrchestrator = merge(local.image_override.orchestrator, {
-      enabled      = true
-      scheduler    = { enabled = true }
-      nodeSelector = { workload = "system" }
+    agentOrchestrator = merge(local.image_override.orchestrator, local.agentic_scheduling, {
+      enabled   = true
+      scheduler = { enabled = true }
     })
 
     hunterAgent      = local.runtime_values["hunter"]
@@ -54,24 +70,25 @@ locals {
 
     # No enabled flag — the proxy renders whenever a runtime does. Confirm it exists in the chart
     # version you pinned, and test an allowed and a denied destination.
-    agentEgressProxy = {
+    # egressExcludeCidrs keeps only link-local. The blob private endpoint sits on a private VNet
+    # address, so excluding RFC1918 ranges here would cut the runtimes off from their artifacts.
+    agentEgressProxy = merge(local.agentic_scheduling, {
       allowedDomains = local.egress_domains
       networkPolicy = {
         enabled            = true
         egressPorts        = [80, 443]
         egressExcludeCidrs = ["169.254.0.0/16"] # cloud metadata endpoint
       }
-    }
+    })
   }
 
   runtime_values = {
     for family, override in {
       hunter      = local.image_override.hunter
       remediation = local.image_override.remediation
-      } : family => merge(override, {
+      } : family => merge(override, local.agentic_scheduling, {
         enabled       = true
         replicaCount  = var.runtime_replica_count
-        nodeSelector  = { workload = "system" }
         networkPolicy = { enabled = true }
     })
   }
@@ -217,6 +234,37 @@ resource "helm_release" "sonarqube" {
   values = compact([
     file("${path.module}/sonarqube-values.yaml"),
 
+    # The Server's load balancer is the Application Gateway's only backend: internal at a fixed
+    # private address, or (gateway-restricted) a public IP that admits only the gateway. Each
+    # branch is encoded separately because the two service shapes differ in type.
+    local.internal_exposure ? yamlencode({
+      service = {
+        type = "LoadBalancer"
+        annotations = {
+          "service.beta.kubernetes.io/azure-load-balancer-internal"        = "true"
+          "service.beta.kubernetes.io/azure-load-balancer-internal-subnet" = azurerm_subnet.private.name
+          "service.beta.kubernetes.io/azure-load-balancer-ipv4"            = local.sonarqube_internal_ip
+        }
+      }
+      }) : yamlencode({
+      service = {
+        type                     = "LoadBalancer"
+        loadBalancerSourceRanges = ["${azurerm_public_ip.appgw.ip_address}/32"]
+        annotations = {
+          "service.beta.kubernetes.io/azure-pip-name"                     = one(azurerm_public_ip.sonarqube_svc[*].name)
+          "service.beta.kubernetes.io/azure-load-balancer-resource-group" = azurerm_kubernetes_cluster.this.node_resource_group
+        }
+      }
+    }),
+
+    # serverBaseURL makes links the Server emits (Remediation Agent pull requests, notifications,
+    # webhooks) carry the public HTTPS hostname.
+    yamlencode({
+      sonarProperties = {
+        "sonar.core.serverBaseURL" = local.sonarqube_url
+      }
+    }),
+
     yamlencode({
       jdbcOverwrite = {
         enabled               = true
@@ -239,15 +287,22 @@ resource "helm_release" "sonarqube" {
       sonarSecretKey = "sonarqube-encryption-secret"
     }) : "",
 
-    var.enable_agentic ? yamlencode(local.agentic) : "",
-    local.use_blob ? yamlencode(local.storage_blob) : "",
-    local.use_files ? yamlencode(local.storage_files) : "",
+    # agentic_paused drops only these documents. The agentic node pool, storage and secrets stay,
+    # so a Server upgrade can run without the agentic workloads and without losing their data.
+    local.agentic_in_helm ? yamlencode(local.agentic) : "",
+    local.use_blob && local.agentic_in_helm ? yamlencode(local.storage_blob) : "",
+    local.use_files && local.agentic_in_helm ? yamlencode(local.storage_files) : "",
   ])
 
   depends_on = [
-    azurerm_postgresql_flexible_server_firewall_rule.aks,
+    azurerm_role_assignment.aks_network, # internal exposure only
+    azurerm_public_ip.sonarqube_svc,     # gateway-restricted exposure only
+    azurerm_kubernetes_cluster_node_pool.sonarqube,
+    azurerm_kubernetes_cluster_node_pool.agentic, # empty unless enable_agentic = true
+    azurerm_postgresql_flexible_server_database.sonarqube,
     azurerm_storage_container.jobs, # empty unless storage_backend = azureblob
     azurerm_storage_container.vortex,
+    azurerm_private_endpoint.blob,
     kubernetes_persistent_volume_claim_v1.jobs, # empty unless storage_backend = azurefiles
     kubernetes_persistent_volume_claim_v1.vortex,
     kubernetes_secret_v1.db,

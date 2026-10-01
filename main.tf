@@ -18,12 +18,33 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.0"
     }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
+    acme = {
+      source  = "vancluever/acme"
+      version = "~> 2.0"
+    }
   }
 }
 provider "azurerm" {
-  features {}
+  features {
+    # The blob account has no public endpoint, so the provider must not attempt data-plane calls
+    # from the machine running Terraform. Containers are managed through Resource Manager instead.
+    storage {
+      data_plane_available = false
+    }
+  }
   subscription_id = var.subscription_id
 }
+
+provider "acme" {
+  server_url = var.acme_server_url
+}
+
+# Passes subscription and tenant to the ACME DNS-01 challenge.
+data "azurerm_client_config" "current" {}
 
 locals {
   kube = azurerm_kubernetes_cluster.this.kube_config[0]

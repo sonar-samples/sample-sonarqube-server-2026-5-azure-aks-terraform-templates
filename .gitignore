@@ -1,11 +1,20 @@
+# Terraform
 .terraform/
 .terraform.lock.hcl
 *.tfstate
 *.tfstate.*
+*.tfplan
 crash.log
-terraform.tfvars
-terraform.tfvars.json
-*.auto.tfvars
 override.tf
 override.tf.json
+
+# Tfvars with real values (keep the .example)
+terraform.tfvars.json
+terraform.tfvars
+*.auto.tfvars
+
+# Settings-encryption key generated in the SonarQube UI
 sonar-secret.txt
+
+# OS
+.DS_Store

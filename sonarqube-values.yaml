@@ -1,23 +1,30 @@
 # Static base values for the SonarQube Helm chart.
 #
-# Everything environment-specific — the database address, the Server image tag, the agentic
-# components and storage paths — is overlaid by sonarqube.tf via yamlencode, so this file needs
-# no substitution and stays readable.
+# Everything environment-specific — the database address, the Server image tag, the internal
+# load balancer, the base URL, the agentic components and storage paths — is overlaid by
+# sonarqube.tf via yamlencode, so this file needs no substitution and stays readable.
 
 edition: enterprise
 
 monitoringPasscodeSecretName: "sonarqube-monitoring-passcode"
 monitoringPasscodeSecretKey: "passcode"
 
-# Pin SonarQube Server to the system pool by label, so scheduling stays explicit rather than
-# incidental if further pools are added.
+# Pin SonarQube Server to its own tainted pool. The chart also uses these two values as the
+# fallback for any agentic component that sets none, which is why sonarqube.tf sets scheduling
+# on every agentic component explicitly.
 nodeSelector:
-  workload: system
+  workload: sonarqube
+tolerations:
+  - key: workload
+    operator: Equal
+    value: sonarqube
+    effect: NoSchedule
 
 # The single-node chart runs Elasticsearch in-process and keeps its indices on disk; without a
 # volume every restart triggers a full reindex.
 persistence:
   enabled: true
+  storageClass: managed-csi
   size: 20Gi
   accessMode: ReadWriteOnce
 
@@ -37,11 +44,13 @@ resources:
     memory: 8Gi
     ephemeral-storage: 20Gi
 
+# Type and annotations are overlaid by sonarqube.tf: an internal load balancer at a fixed private
+# address, which Application Gateway uses as its only backend.
 service:
-  type: ClusterIP
   externalPort: 9000
 
-# Ingress is out of scope for this module. Add Application Gateway, DNS and TLS separately.
+# Application Gateway (appgateway.tf) terminates TLS and routes to the Server, so neither
+# in-cluster ingress option is used.
 ingress:
   enabled: false
 httproute:
