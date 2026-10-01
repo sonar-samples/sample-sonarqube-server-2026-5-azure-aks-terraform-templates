@@ -91,6 +91,12 @@ resource "azurerm_kubernetes_cluster" "this" {
   identity {
     type = "SystemAssigned"
   }
+
+  # Organization policies often turn on the Azure Policy add-on after creation. Leaving it
+  # unmanaged stops every apply from switching it off only for the policy to switch it back on.
+  lifecycle {
+    ignore_changes = [azure_policy_enabled]
+  }
 }
 
 # SonarQube Server pool. Tainted so only the Server (which carries the matching toleration in
