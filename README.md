@@ -57,12 +57,22 @@ Copy `terraform.tfvars.json.example` into `terraform.tfvars.json` and update the
   "host_name": "sonarqube",
   "acme_email": "platform-team@example.com",
 
+  "vnet_cidr": "10.0.0.0/16",
+  "aks_subnet_cidr": "10.0.1.0/24",
+  "appgw_subnet_cidr": "10.0.2.0/24",
+  "postgresql_subnet_cidr": "10.0.3.0/28",
+  "private_subnet_cidr": "10.0.4.0/24",
+
   "sonarqube_chart_version": "2026.5.1001",
   "sonarqube_exposure": "internal",
 
   "enable_agentic": false,
+  "agentic_paused": false,
+  "runtime_replica_count": 1,
   "llm_allowed_domains": ["api.anthropic.com"],
   "storage_account_name": "acmesqagentic01",
+
+  "enable_settings_encryption": false,
 
   "tags": { "Team": "", "Owner": "" }
 }
@@ -73,6 +83,9 @@ Copy `terraform.tfvars.json.example` into `terraform.tfvars.json` and update the
 - `sonarqube_exposure` - `internal` (default) uses an internal load balancer and grants the cluster Network Contributor on the VNet. `gateway-restricted` needs no role assignment: the Server gets a public IP that admits only the Application Gateway.
 - `enable_agentic` - also creates the agentic node pool, storage, and secrets. Setting it back to `false` destroys them and their data; use `agentic_paused` for upgrades.
 - `llm_allowed_domains` - every runtime destination (LLM, identity, DevOps). The Blob storage host is added automatically.
+- Subnet CIDRs must not overlap each other or any network you peer with. `postgresql_subnet_cidr` requires at least a /28.
+- `runtime_replica_count` - concurrent jobs per agent runtime
+- `enable_settings_encryption` - set `true` on a second apply, after creating the `sonarqube-encryption-secret` from a key generated in the SonarQube UI
 - `postgres_name` and `storage_account_name` must be globally unique
 - Set `postgres_high_availability` to `false` where zone-redundant HA is not offered (`az postgres flexible-server list-skus -l <region>`)
 - `create_resource_group` - set `false` to deploy into an existing resource group
