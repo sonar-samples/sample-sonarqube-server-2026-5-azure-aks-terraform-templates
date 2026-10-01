@@ -1,50 +1,21 @@
 {
   "subscription_id": "00000000-0000-0000-0000-000000000000",
   "location": "westeurope",
-
   "resource_group_name": "sonarqube-2026-5",
   "cluster_name": "sonarqube-aks",
   "postgres_name": "sonarqube-pg-changeme",
-  "db_username": "sonarqube",
 
   "domain_name": "example.com",
   "dns_resource_group_name": "dns-zones",
   "host_name": "sonarqube",
   "acme_email": "platform-team@example.com",
 
-  "vnet_cidr": "10.0.0.0/16",
-  "aks_subnet_cidr": "10.0.1.0/24",
-  "appgw_subnet_cidr": "10.0.2.0/24",
-  "postgresql_subnet_cidr": "10.0.3.0/28",
-  "private_subnet_cidr": "10.0.4.0/24",
-
+  "sonarqube_chart_version": "2026.5.1001",
   "sonarqube_exposure": "internal",
 
-  "kubernetes_version": null,
-
-  "sonarqube_chart_version": "2026.5.1001",
-  "sonarqube_image_tag": "",
-
   "enable_agentic": false,
-  "agentic_paused": false,
-  "runtime_replica_count": 1,
-
-  "agentic_images": {
-    "vortex":       { "repository": "", "tag": "" },
-    "orchestrator": { "repository": "", "tag": "" },
-    "hunter":       { "repository": "", "tag": "" },
-    "remediation":  { "repository": "", "tag": "" }
-  },
-
   "llm_allowed_domains": ["api.anthropic.com"],
-
-  "storage_backend": "azureblob",
   "storage_account_name": "acmesqagentic01",
 
-  "enable_settings_encryption": false,
-
-  "tags": {
-    "Team": "",
-    "Owner": ""
-  }
+  "tags": { "Team": "", "Owner": "" }
 }
