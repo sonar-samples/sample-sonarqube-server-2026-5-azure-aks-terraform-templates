@@ -1,5 +1,9 @@
 # SonarQube Server 2026.5 Enterprise Edition with agentic components - Azure AKS Installation
 
+> Last updated: October 2026
+>
+> The observed output reflects its recorded environment and may differ by release, organization, and entitlement. Check the current SonarQube documentation before using these instructions in a live environment.
+
 This repository contains Terraform templates for deploying SonarQube Server 2026.5 Enterprise Edition on Azure Kubernetes Service (AKS), optionally with the agentic components: Sonar Vortex analysis, the Agent Orchestrator, SonarQube Hunter Agent, and SonarQube Remediation Agent.
 
 ## Infrastructure Components
